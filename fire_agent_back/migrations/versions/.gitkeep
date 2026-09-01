@@ -1,0 +1,2 @@
+"""空版本目录 — 首条迁移由 `alembic revision --autogenerate -m "init"` 生成
+"""
