@@ -1219,87 +1219,87 @@ KB_TOP_K=5
 
 #### 12.1.1.**主页效果**
 
-![](README - 副本.assets/01总体效果.png)
+![](./README.assets/01总体效果.png)
 
 #### 12.1.2.**天气组件效果**
 
-![](README - 副本.assets/02天气组件.png)
+![](./README.assets/02天气组件.png)
 
 #### 12.1.3.**时间组件效果**
 
-![](README - 副本.assets/03时间组件.png)
+![](./README.assets/03时间组件.png)
 
 #### 12.1.4.**热力图效果**
 
-![](README - 副本.assets/04热力图效果.png)
+![](./README.assets/04热力图效果.png)
 
 #### 12.1.5.**测量工具效果**
 
-![](README - 副本.assets/05测量距离.png)
+![](./README.assets/05测量距离.png)
 
-![](README - 副本.assets/05测量面积.png)
+![](./README.assets/05测量面积.png)
 
 #### 12.1.6.**画笔工具效果**
 
-![](README - 副本.assets/06画笔工具.png)
+![](./README.assets/06画笔工具.png)
 
 #### 12.1.7.**图层管理工具效果**
 
-![](README - 副本.assets/07图层管理.png)
+![](./README.assets/07图层管理.png)
 
 ##### 12.1.8.**定位到云南工具效果**
 
-#### ![](README - 副本.assets/08定位到云南那.gif)
+#### ![](./README.assets/08定位到云南那.gif)
 
 #### 12.1.9.**下载地图工具效果**
 
-![](README - 副本.assets/09下载地图.png)
+![](./README.assets/09下载地图.png)
 
 #### **12.1.10.筛选特定火点效果**（逐月/逐日）
 
-![](README - 副本.assets/10筛选特定火点.png)
+![](./README.assets/10筛选特定火点.png)
 
 #### **12.1.11.火点详情展示**
 
-![](README - 副本.assets/11火点详情.png)
+![](./README.assets/11火点详情.png)
 
 **12.1.12.数据连接效果**
 
-![](README - 副本.assets/12数据连接效果.png)
+![](./README.assets/12数据连接效果.png)
 
 **12.1.13.预警信息**
 
-![](README - 副本.assets/13预警信息.png)
+![](./README.assets/13预警信息.png)
 
 #### **12.1.14.历史火点危害等级**
 
-![](README - 副本.assets/00-1历史火点等级.gif)
+![](./README.assets/00-1历史火点等级.gif)
 
 #### **12.1.15.历史火点发生频次**
 
-![](README - 副本.assets/00-2历史火点频次.gif)
+![](./README.assets/00-2历史火点频次.gif)
 
 #### **12.1.16.预测火险等级占比**
 
-![](README - 副本.assets/00-3预测等级.gif)
+![](./README.assets/00-3预测等级.gif)
 
 #### **12.1.17.预测火点占比+详情**
 
-![](README - 副本.assets/00-4预测火点占比+详情.gif)
+![](./README.assets/00-4预测火点占比+详情.gif)
 
 #### **12.1.18.预测区域火险可视化**
 
-![](README - 副本.assets/00-5预测区域火险可视化.gif)
+![](./README.assets/00-5预测区域火险可视化.gif)
 
 **12.1.19.AI识别火险**
 
-![](README - 副本.assets/09火情识别.gif)
+![](./README.assets/09火情识别.gif)
 
 ### 12.2.智能查询
 
 #### **12.2.1.查询演示**
 
-![](README - 副本.assets/11智能查询.gif)
+![](./README.assets/11智能查询.gif)
 
 ### 12.3.知识库
 
@@ -1307,27 +1307,27 @@ KB_TOP_K=5
 
 **注意**：历史记录只有你在不切换模型的情况下才会调用数据库历史，而如果你切换了模型，点击历史记录条目需要重新提问。而且所有的语音播报都需要等待一段时间
 
-![](README - 副本.assets/21RAG知识库.gif)
+![](./README.assets/21RAG知识库.gif)
 
 ### 12.4.Agent协作中心
 
 #### **12.4.1.多Agent协作写报告**
 
-![](README - 副本.assets/31多Agent写作.gif)
+![](./README.assets/31多Agent写作.gif)
 
 ### 12.5.报告中心
 
 #### **12.5.1.报告展示与下载**
 
-![](README - 副本.assets/31多Agent写作.gif)![](README - 副本.assets/42删除报告（修正）.png)
+![](/README.assets/31多Agent写作.gif)![](./README.assets/42删除报告（修正）.png)
 
 ### 12.6.系统管理（admin专属）
 
-![](README - 副本.assets/51系统管理.gif)
+![](./README.assets/51系统管理.gif)
 
 ### **12.6.注册登录**
 
-![](README - 副本.assets/61注册登录.gif)
+![](./README.assets/61注册登录.gif)
 
 ---
 
