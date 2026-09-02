@@ -8,7 +8,7 @@
 >
 > - 后端：https://gitee.com/wjl2004/fire_agent_back
 > - 前端：https://gitee.com/wjl2004/fire_agent_front
->   **系统演示**：https://wjl2004.ffuf.cn/
+>   **系统演示**：https://wjl2004.ffuf.cn/     or     https://8.156.67.47/login
 > - **演示账户**： test       123456
 > - **GitHub 仓库**：https://github.com/wjl-cong/fire_agent（⭐ 欢迎 Star）
 
