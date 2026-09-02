@@ -14,7 +14,14 @@ from app.core.security import (
     get_current_user,
 )
 from app.models.user import User
-from app.schemas.user import RegisterRequest, LoginRequest, UserOut, TokenData
+from app.schemas.user import (
+    ChangePasswordRequest,
+    LoginRequest,
+    RegisterRequest,
+    TokenData,
+    UpdateMeRequest,
+    UserOut,
+)
 
 router = APIRouter()
 
@@ -66,3 +73,30 @@ async def login(req: LoginRequest, db: Session = Depends(get_db)):
 async def me(current: User = Depends(get_current_user)):
     """获取当前登录用户信息"""
     return {"code": 200, "message": "success", "data": UserOut.model_validate(current)}
+
+
+@router.put("/me")
+async def update_me(req: UpdateMeRequest, current: User = Depends(get_current_user),
+                    db: Session = Depends(get_db)):
+    """修改个人资料（邮箱）"""
+    if req.email is not None:
+        email = req.email.strip() or None
+        if email and db.query(User).filter(User.email == email, User.id != current.id).first():
+            raise HTTPException(status_code=400, detail="邮箱已被其他账号使用")
+        current.email = email
+        db.commit()
+        db.refresh(current)
+    return {"code": 200, "message": "资料已更新", "data": UserOut.model_validate(current)}
+
+
+@router.put("/me/password")
+async def change_password(req: ChangePasswordRequest, current: User = Depends(get_current_user),
+                          db: Session = Depends(get_db)):
+    """修改密码（需验证旧密码；修改后需重新登录）"""
+    if not verify_password(req.old_password, current.password_hash):
+        raise HTTPException(status_code=400, detail="旧密码错误")
+    if req.old_password == req.new_password:
+        raise HTTPException(status_code=400, detail="新密码不能与旧密码相同")
+    current.password_hash = hash_password(req.new_password)
+    db.commit()
+    return {"code": 200, "message": "密码已修改，请使用新密码重新登录", "data": {"ok": True}}

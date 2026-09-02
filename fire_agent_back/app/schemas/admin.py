@@ -17,7 +17,8 @@ class ConfigUpdate(BaseModel):
     llm_model: Optional[str] = None
     embedding_model: Optional[str] = None
 
-    # 视觉 / 语音模型（恒定阿里百炼）
+    # 视觉 / 语音模型（视觉可切换 aliyun/amd，语音恒定阿里百炼）
+    vision_provider: Optional[str] = None  # aliyun | amd
     vision_model: Optional[str] = None
     asr_model: Optional[str] = None
     tts_model: Optional[str] = None

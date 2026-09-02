@@ -18,6 +18,17 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class UpdateMeRequest(BaseModel):
+    """个人资料更新（邮箱）"""
+    email: Optional[str] = Field(default=None, max_length=120)
+
+
+class ChangePasswordRequest(BaseModel):
+    """修改密码（需验证旧密码）"""
+    old_password: str = Field(min_length=6, max_length=64)
+    new_password: str = Field(min_length=6, max_length=64)
+
+
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

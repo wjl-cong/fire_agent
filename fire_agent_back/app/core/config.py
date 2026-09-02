@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     LLM_API_BASE: str = ""
     LLM_MODEL: str = "qwen-plus"
     EMBEDDING_MODEL: str = "text-embedding-v3"
-    # 视觉 / 语音模型（恒定阿里百炼，独立于 ACTIVE_LLM_PROVIDER）
+    # 视觉 / 语音模型（视觉可切换 aliyun/amd，语音恒定阿里百炼）
+    VISION_PROVIDER: str = "aliyun"
     VISION_MODEL: str = "qwen-vl-plus"
     ASR_MODEL: str = "qwen3-asr-flash"
     TTS_MODEL: str = "qwen3-tts-flash"
@@ -69,7 +70,7 @@ class Settings(BaseSettings):
     KB_CHUNK_OVERLAP: int = 50
     KB_TOP_K: int = 5
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

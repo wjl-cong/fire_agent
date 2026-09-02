@@ -21,6 +21,10 @@ const form = ref({
   email: '',
 })
 
+// 密码显示/隐藏（眼睛按钮）
+const showPwd = ref(false)
+const showConfirm = ref(false)
+
 const onSubmit = async () => {
   const u = form.value.username.trim()
   const p = form.value.password
@@ -94,12 +98,36 @@ const switchMode = (m) => {
 
         <label class="field">
           <span>密码</span>
-          <input v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="onSubmit" />
+          <div class="pwd-wrap">
+            <input v-model="form.password" :type="showPwd ? 'text' : 'password'" placeholder="请输入密码" @keyup.enter="onSubmit" />
+            <button type="button" class="eye-btn" :title="showPwd ? '隐藏密码' : '显示密码'" @click="showPwd = !showPwd">
+              <svg v-if="showPwd" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
         </label>
 
         <label v-if="mode === 'register'" class="field">
           <span>确认密码</span>
-          <input v-model="form.confirm" type="password" placeholder="请再次输入密码" @keyup.enter="onSubmit" />
+          <div class="pwd-wrap">
+            <input v-model="form.confirm" :type="showConfirm ? 'text' : 'password'" placeholder="请再次输入密码" @keyup.enter="onSubmit" />
+            <button type="button" class="eye-btn" :title="showConfirm ? '隐藏密码' : '显示密码'" @click="showConfirm = !showConfirm">
+              <svg v-if="showConfirm" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+              <svg v-else viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </button>
+          </div>
         </label>
 
         <button class="submit-btn" :disabled="loading" @click="onSubmit">
@@ -198,6 +226,7 @@ const switchMode = (m) => {
   color: #94a3b8;
 }
 .field input {
+  width: 100%;
   padding: 10px 12px;
   font-size: 13px;
   color: #f8fafc;
@@ -206,6 +235,33 @@ const switchMode = (m) => {
   border-radius: 6px;
   outline: none;
   transition: border 0.15s;
+}
+.pwd-wrap {
+  position: relative;
+  display: flex;
+}
+.pwd-wrap input {
+  padding-right: 38px;
+}
+.eye-btn {
+  position: absolute;
+  right: 6px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  color: #64748b;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+.eye-btn:hover {
+  color: #38bdf8;
 }
 .field input:focus {
   border-color: #0ea5e9;

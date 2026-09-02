@@ -8,6 +8,7 @@
  *   /knowledge-base  → 知识库 RAG 问答
  *   /agent-center    → Agent 协作中心
  *   /report-center   → 报告中心
+ *   /profile         → 个人中心（资料/密码）
  *   /admin           → 系统管理（仅管理员）
  */
 import { createRouter, createWebHistory } from 'vue-router'
@@ -57,6 +58,12 @@ const router = createRouter({
             name: 'report-center',
             component: () =>
                 import ('@/views/report-center/index.vue')
+        },
+        {
+            path: '/profile',
+            name: 'profile',
+            component: () =>
+                import ('@/views/profile/index.vue')
         },
         {
             path: '/admin',

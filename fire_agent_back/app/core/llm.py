@@ -51,7 +51,18 @@ def _bailian_base() -> str:
 
 
 def get_vision_llm(**kwargs) -> ChatOpenAI | None:
-    """视觉理解模型实例（qwen-vl 系列，多模态消息格式）"""
+    """视觉理解模型实例（按 VISION_PROVIDER 路由：aliyun 百炼 / amd GPU Cloud）"""
+    if settings.VISION_PROVIDER == "amd":
+        if not settings.AMD_API_KEY or not settings.VISION_MODEL:
+            return None
+        return ChatOpenAI(
+            model=kwargs.get("model", settings.VISION_MODEL),
+            api_key=settings.AMD_API_KEY,
+            base_url=settings.AMD_API_BASE or "https://developer.amd.com.cn/radeon/v1",
+            temperature=kwargs.get("temperature", 0.1),
+            max_tokens=kwargs.get("max_tokens", 2048),
+        )
+    # 默认阿里百炼
     if not settings.LLM_API_KEY:
         return None
     return ChatOpenAI(
@@ -65,6 +76,8 @@ def get_vision_llm(**kwargs) -> ChatOpenAI | None:
 
 def vision_available() -> bool:
     """视觉模型是否可用"""
+    if settings.VISION_PROVIDER == "amd":
+        return bool(settings.AMD_API_KEY and settings.VISION_MODEL)
     return bool(settings.LLM_API_KEY and settings.VISION_MODEL)
 
 
@@ -198,8 +211,8 @@ def _get_amd_llm(**kwargs) -> ChatOpenAI | None:
         return None
     # 模型选择：优先使用 kwargs 参数，否则使用配置的默认模型
     model = kwargs.get("model", settings.AMD_MODEL or "DeepSeek-V4-Flash")
-    # Qwen3.8-Flash-Next 时间窗口校验
-    if "qwen3.8" in model.lower() or "Qwen3.8" in model:
+    # Qwen3.8-Flash 系列免费模型需时间窗口校验（Qwen3.8-27B 等付费专属模型不受限）
+    if "qwen3.8-flash" in model.lower():
         if not is_qwen3_8_available():
             return None  # 不在可用窗口内，返回 None 触发降级
     return ChatOpenAI(

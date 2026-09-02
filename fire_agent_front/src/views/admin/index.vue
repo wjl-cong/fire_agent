@@ -6,7 +6,7 @@
  */
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Connection, Monitor, Setting, Document, CircleCheck, CircleClose, User as UserIcon, Promotion, Cpu } from '@element-plus/icons-vue'
+import { Refresh, Connection, Monitor, Setting, Document, CircleCheck, CircleClose, Promotion, Cpu } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { API_V1 } from '@/utils/config'
 import { useRouter } from 'vue-router'
@@ -14,6 +14,7 @@ import { useRouter } from 'vue-router'
 const API_BASE = `${API_V1}/admin`
 const auth = useAuthStore()
 const router = useRouter()
+
 
 // 带鉴权的 fetch：自动附加 token，401 时回登录页
 const authFetch = async (url, options = {}) => {
@@ -45,6 +46,7 @@ const configForm = reactive({
   llm_model: '',
   embedding_model: '',
   // 视觉 / 语音模型
+  vision_provider: 'aliyun',
   vision_model: '',
   asr_model: '',
   tts_model: '',
@@ -103,6 +105,7 @@ const fetchConfig = async () => {
         llm_api_base: m.llm_api_base || '',
         llm_model: m.llm_model || '',
         embedding_model: m.embedding_model || '',
+        vision_provider: m.vision_provider || 'aliyun',
         vision_model: m.vision_model || '',
         asr_model: m.asr_model || '',
         tts_model: m.tts_model || '',
@@ -157,9 +160,109 @@ const qwen3_8Status = computed(() => {
   }
 })
 
-const amdModels = ['DeepSeek-V4-Flash', 'Qwen3.8-Flash-Next']
+// ====== AMD GPU Cloud 模型列表（动态获取 + 计费层级） ======
+const amdModelList = ref(null) // { fetch_ok, available_count, current_model, models, key_info }
+const loadingAmdModels = ref(false)
+const amdCategory = ref('text') // 分类 Tab：text/vision
 
-// ====== 百炼免费额度模型列表 ======
+const amdCategoryTabs = [
+  { key: 'text', label: '大语言模型' },
+  { key: 'vision', label: '视觉模型' },
+]
+
+// 当前分类下的 AMD 模型（后端已按 免费优先 排好序）
+const filteredAmdModels = computed(() => {
+  if (!amdModelList.value) return []
+  return amdModelList.value.models.filter(m => m.category === amdCategory.value)
+})
+
+// 各分类数量徽标
+const amdCategoryCount = (key) => {
+  if (!amdModelList.value) return 0
+  return amdModelList.value.models.filter(m => m.category === key).length
+}
+
+const fetchAmdModels = async () => {
+  loadingAmdModels.value = true
+  try {
+    const res = await authFetch(`${API_BASE}/llm/models?provider=amd`)
+    const json = await res.json()
+    if (json.code === 200) {
+      amdModelList.value = json.data
+      if (!json.data.fetch_ok) {
+        if (json.data.key_info?.directory_ok) {
+          ElMessage.warning('已获取 AMD 官方模型目录，但 /models 校验失败（请检查 API Key），可用性标记仅供参考')
+        } else {
+          ElMessage.warning('AMD 官方目录与 /models 均拉取失败，请检查网络与 API Key')
+        }
+      } else {
+        ElMessage.success(`已获取 ${json.data.available_count} 个可用模型`)
+      }
+    } else {
+      ElMessage.error('获取 AMD 模型列表失败')
+    }
+  } catch {
+    ElMessage.error('获取 AMD 模型列表失败')
+  } finally {
+    loadingAmdModels.value = false
+  }
+}
+
+// AMD 计费层级标签（free=免费 / limited_free=限时免费 / paid=付费专属实例）
+const tierTag = (tier) => ({
+  free: { text: '免费', type: 'success' },
+  limited_free: { text: '限时免费', type: 'warning' },
+  paid: { text: '付费', type: 'danger' },
+}[tier] || { text: '未知', type: 'info' })
+
+// 一键切换 AMD 模型：text→AMD_MODEL；vision→vision_provider='amd' + VISION_MODEL
+// 均写 .env 热生效，无需重启
+const applyAmdModel = async (mid, category = 'text') => {
+  let payload, label
+  if (category === 'vision') {
+    payload = { active_provider: 'amd', vision_provider: 'amd', vision_model: mid }
+    label = '视觉识别'
+  } else {
+    payload = { active_provider: 'amd', amd_model: mid }
+    label = 'Chat'
+  }
+  try {
+    const res = await authFetch(`${API_BASE}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+    const json = await res.json()
+    if (json.code === 200) {
+      if (category === 'vision') {
+        configForm.vision_provider = 'amd'
+        configForm.vision_model = mid
+        if (amdModelList.value?.key_info) {
+          amdModelList.value.key_info.vision_provider = 'amd'
+          amdModelList.value.key_info.vision_model = mid
+        }
+      } else {
+        configForm.amd_model = mid
+        if (amdModelList.value?.key_info) amdModelList.value.key_info.current_model = mid
+      }
+      if (amdModelList.value) {
+        amdModelList.value.models = amdModelList.value.models.map(m => {
+          // 同分类的模型互斥更新"当前"标记
+          const sameSlot = m.category === category
+          return sameSlot ? { ...m, is_current: m.id === mid } : m
+        })
+      }
+      ElMessage.success(`已切换${label}模型：${mid}（已写入 .env 并热生效）`)
+      fetchStatus()
+    } else {
+      ElMessage.error('切换失败')
+    }
+  } catch {
+    ElMessage.error('切换失败')
+  }
+}
+
+// ====== 百炼模型列表 ======
 const modelList = ref(null) // { fetch_ok, available_count, current_model, categories, models, key_info }
 const loadingModels = ref(false)
 const modelCategory = ref('text') // 分类 Tab：text/vision/multimodal/audio/embedding
@@ -184,6 +287,9 @@ const categoryCount = (key) => {
   return modelList.value.models.filter(m => m.category === key).length
 }
 
+// 模型列表展开/收起（避免占位过大）
+const modelListVisible = ref(false)
+
 const fetchFreeModels = async () => {
   loadingModels.value = true
   try {
@@ -191,10 +297,15 @@ const fetchFreeModels = async () => {
     const json = await res.json()
     if (json.code === 200) {
       modelList.value = json.data
+      modelListVisible.value = true
       if (!json.data.fetch_ok) {
-        ElMessage.warning('百炼 /models 接口拉取失败，展示内置免费额度目录（未经可用性校验），请检查 API Key')
+        if (json.data.key_info?.directory_ok) {
+          ElMessage.warning('已解析官方免费额度目录，但 /models 校验失败（请检查 API Key），可用性标记仅供参考')
+        } else {
+          ElMessage.warning('官方目录与 /models 均拉取失败，展示内置免费额度目录（未经可用性校验）')
+        }
       } else {
-        ElMessage.success(`已获取 ${json.data.available_count} 个可用模型`)
+        ElMessage.success(`已获取 ${json.data.available_count} 个可用模型（免费额度目录 ${json.data.key_info.free_count} 个）`)
       }
     } else {
       ElMessage.error('获取模型列表失败')
@@ -206,14 +317,112 @@ const fetchFreeModels = async () => {
   }
 }
 
+// ====== 百炼账号免费额度（静态内置快照） ======
+const bailianQuota = ref(null) // { ok, rows, counts, total, snapshot_date }
+const loadingBailianQuota = ref(false)
+
+// 加载账号免费额度（静态数据，剩余量/过期时间/状态）
+const fetchBailianQuota = async () => {
+  loadingBailianQuota.value = true
+  try {
+    const res = await authFetch(`${API_BASE}/bailian/quota`)
+    const json = await res.json()
+    if (json.data?.ok) {
+      bailianQuota.value = json.data
+      quotaVisible.value = true
+      ElMessage.success(`已加载 ${json.data.total} 条账号免费额度（快照 ${json.data.snapshot_date}）`)
+    } else {
+      bailianQuota.value = json.data || { ok: false, rows: [] }
+      ElMessage.warning('加载失败')
+    }
+  } catch {
+    ElMessage.error('加载失败')
+  } finally {
+    loadingBailianQuota.value = false
+  }
+}
+
+// 过期时间临近提醒（30 天内标橙）
+const isExpiringSoon = (expire) => {
+  if (!expire) return false
+  const t = new Date(expire.replace(/-/g, '/')).getTime()
+  if (Number.isNaN(t)) return false
+  return t - Date.now() < 30 * 86400 * 1000
+}
+
+// ====== 额度快照：展开/收起、分类 Tab、用途映射、按过期时间排序 ======
+const quotaVisible = ref(false)
+const quotaCategory = ref('all')
+
+const quotaTabs = [
+  { key: 'all', label: '全部' },
+  { key: 'text', label: '语言模型' },
+  { key: 'vision', label: '视觉模型' },
+  { key: 'multimodal', label: '全模态' },
+  { key: 'audio', label: '语音模型' },
+  { key: 'embedding', label: '向量模型' },
+]
+
+const quotaTabCount = (key) => {
+  if (!bailianQuota.value?.ok) return 0
+  return key === 'all'
+    ? bailianQuota.value.rows.length
+    : bailianQuota.value.rows.filter(r => r.category === key).length
+}
+
+// 用途映射：「使用」按钮写入哪个配置槽；null = 系统暂不支持（按钮禁用）
+const quotaUsage = (row) => {
+  const m = row.model || ''
+  if (row.category === 'text') {
+    return { field: 'llm_model', usage: 'chat', label: '对话模型' }
+  }
+  if (row.category === 'embedding') {
+    return m.includes('rerank')
+      ? null
+      : { field: 'embedding_model', usage: 'embedding', label: '向量模型' }
+  }
+  if (row.category === 'audio') {
+    if (/tts|sambert|cosyvoice/i.test(m)) return { field: 'tts_model', usage: 'tts', label: '语音合成 (TTS)' }
+    if (/asr|paraformer|fun-asr/i.test(m)) return { field: 'asr_model', usage: 'asr', label: '语音识别 (ASR)' }
+  }
+  return null
+}
+
+// 说明列：用途去向或暂不支持原因
+const quotaRemark = (row) => {
+  const u = quotaUsage(row)
+  if (u) return `点击使用 → 设为${u.label}`
+  if (row.category === 'embedding') return '重排序模型，系统暂不支持'
+  return '生图 / 视频生成模型，系统暂不支持'
+}
+
+// 当前使用标记（与配置槽比对）
+const quotaIsCurrent = (row) => {
+  const u = quotaUsage(row)
+  return !!u && configForm[u.field] === row.model
+}
+
+// 排序：谁先过期谁在前面（2099 永久额度排最后）
+const filteredQuotaRows = computed(() => {
+  if (!bailianQuota.value?.ok) return []
+  let rows = [...bailianQuota.value.rows]
+  if (quotaCategory.value !== 'all') rows = rows.filter(r => r.category === quotaCategory.value)
+  const t = (s) => {
+    const v = new Date(String(s || '').replace(/-/g, '/')).getTime()
+    return Number.isNaN(v) ? 8.64e15 : v
+  }
+  return rows.sort((a, b) => t(a.expire) - t(b.expire) || a.model.localeCompare(b.model))
+})
+
 // 一键切换模型：写 .env 热生效，无需重启
 // text→Chat / embedding→Embedding / vision·multimodal→视觉 / audio→ASR·TTS（按 usage）
 const applyModel = async (mid, category = 'text', usage = '') => {
-  let field, label
+  let field, label, extra = null
   if (category === 'embedding') {
     field = 'embedding_model'; label = 'Embedding'
   } else if (category === 'vision' || category === 'multimodal') {
     field = 'vision_model'; label = '视觉识别'
+    extra = { vision_provider: 'aliyun' } // 视觉切回百炼
   } else if (category === 'audio') {
     if (usage === 'tts') { field = 'tts_model'; label = '语音合成' }
     else { field = 'asr_model'; label = '语音识别' }
@@ -224,11 +433,12 @@ const applyModel = async (mid, category = 'text', usage = '') => {
     const res = await authFetch(`${API_BASE}/config`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ active_provider: 'aliyun', [field]: mid }),
+      body: JSON.stringify({ active_provider: 'aliyun', [field]: mid, ...(extra || {}) }),
     })
     const json = await res.json()
     if (json.code === 200) {
       if (configForm[field] !== undefined) configForm[field] = mid
+      if (extra && configForm.vision_provider !== undefined) configForm.vision_provider = 'aliyun'
       if (modelList.value) {
         modelList.value.models = modelList.value.models.map(m => {
           // 同用途的模型互斥更新"当前"标记
@@ -592,18 +802,23 @@ onUnmounted(() => {
         <!-- 百炼免费额度模型选择 -->
         <div class="free-models-head">
           <div class="panel-sub" style="margin:0">
-            百炼免费额度模型
+            百炼模型
             <el-button size="small" :loading="loadingModels" style="margin-left:12px" @click="fetchFreeModels">
               <el-icon><Refresh /></el-icon>&nbsp;获取模型列表
             </el-button>
+            <el-button v-if="modelList" size="small" @click="modelListVisible = !modelListVisible">
+              {{ modelListVisible ? '收起' : '展开' }}
+            </el-button>
           </div>
           <div class="free-models-hint">
-            点击获取后，系统调用百炼 <code>GET /compatible-mode/v1/models</code> 接口校验当前 API Key
-            可用的模型，并展示 <b>大语言 / 视觉 / 全模态 / 语音 / 向量</b> 五大类免费额度信息。
-            点击「使用」立即切换并热生效，无需重启。
+            点击「获取模型列表」，系统将根据<b>已保存的阿里云密钥</b>调用百炼
+            <code>GET /compatible-mode/v1/models</code> 获取真实可用模型，同时实时解析官方计费文档的
+            免费额度目录（官方新增/调整自动跟随），按 <b>大语言 / 视觉 / 全模态 / 语音 / 向量</b> 五大类展示。
+            点击「使用」立即切换并热生效，无需重启。列表可随时收起以节省空间。
           </div>
         </div>
 
+        <template v-if="modelListVisible">
         <!-- 密钥使用概况卡片 -->
         <div v-if="modelList && modelList.key_info" class="key-info-card">
           <div class="ki-row">
@@ -625,7 +840,7 @@ onUnmounted(() => {
             </div>
             <div class="ki-item">
               <span class="ki-label">视觉识别模型</span>
-              <span class="ki-value mono">{{ modelList.key_info.vision_model || '-' }}</span>
+              <span class="ki-value mono">{{ modelList.key_info.vision_model || '-' }}（{{ modelList.key_info.vision_provider === 'amd' ? 'AMD' : '百炼' }}）</span>
             </div>
             <div class="ki-item">
               <span class="ki-label">语音识别 / 合成</span>
@@ -650,11 +865,11 @@ onUnmounted(() => {
         </div>
 
         <el-alert
-          v-if="modelList && !modelList.fetch_ok"
+          v-if="modelList && !modelList.fetch_ok && !modelList.key_info?.directory_ok"
           type="warning"
           :closable="false"
           style="margin-bottom:10px"
-          title="百炼 /models 接口拉取失败（请检查 API Key / 网络），下表为内置免费额度目录，可用性未经校验"
+          title="官方目录与 /models 接口均拉取失败（请检查网络 / API Key），下表为内置免费额度目录"
         />
 
         <!-- 分类 Tab -->
@@ -704,6 +919,106 @@ onUnmounted(() => {
             </template>
           </el-table-column>
         </el-table>
+        </template>
+
+        <!-- 百炼账号免费额度（静态内置快照：剩余量/过期时间/状态） -->
+        <div class="free-models-head" style="margin-top:18px">
+          <div class="panel-sub" style="margin:0">
+            账号免费额度（控制台快照）
+            <el-button size="small" :loading="loadingBailianQuota" style="margin-left:12px" @click="fetchBailianQuota">
+              <el-icon><Refresh /></el-icon>&nbsp;{{ bailianQuota ? '刷新额度' : '加载额度' }}
+            </el-button>
+            <el-button v-if="bailianQuota && bailianQuota.ok" size="small" @click="quotaVisible = !quotaVisible">
+              {{ quotaVisible ? '收起' : '展开' }}
+            </el-button>
+            <span v-if="bailianQuota && bailianQuota.ok" class="quota-summary">
+              语言 {{ bailianQuota.counts.text }} · 视觉 {{ bailianQuota.counts.vision }} ·
+              全模态 {{ bailianQuota.counts.multimodal }} · 向量 {{ bailianQuota.counts.embedding }} ·
+              语音 {{ bailianQuota.counts.audio }}，共 {{ bailianQuota.total }} 条（快照 {{ bailianQuota.snapshot_date }}）
+            </span>
+          </div>
+          <div class="free-models-hint">
+            「剩余量 / 过期时间 / 状态」是阿里云账号级数据（控制台需登录、无公开 API），已内置为静态快照；
+            表格<b>按过期时间升序</b>（谁先过期谁在前面，2099 永久额度排最后）。
+            「使用」可将该模型设为对应用途（对话 / 向量 / 语音识别 / 语音合成）并写入 .env 热生效；
+            生图 / 视频生成、重排序类模型系统暂不支持，按钮置灰。
+          </div>
+        </div>
+
+        <template v-if="quotaVisible && bailianQuota && bailianQuota.ok">
+          <!-- 分类 Tab -->
+          <div class="model-category-tabs">
+            <button
+              v-for="tab in quotaTabs"
+              :key="tab.key"
+              class="cat-tab"
+              :class="{ active: quotaCategory === tab.key }"
+              @click="quotaCategory = tab.key"
+            >
+              {{ tab.label }}
+              <span class="cat-count">{{ quotaTabCount(tab.key) }}</span>
+            </button>
+          </div>
+
+          <el-table :data="filteredQuotaRows" size="small" max-height="380" border>
+            <el-table-column prop="model" label="模型 Code" min-width="210" show-overflow-tooltip>
+              <template #default="{ row }">
+                <el-tag v-if="quotaIsCurrent(row)" type="success" size="small">当前</el-tag>
+                <span style="margin-left:6px; font-family: monospace">{{ row.model }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="category" label="类别" width="100" align="center">
+              <template #default="{ row }">
+                <el-tag size="small" :type="{ text: 'primary', vision: 'warning', multimodal: 'success', embedding: 'danger', audio: 'info' }[row.category]">
+                  {{ { text: '语言', vision: '视觉', multimodal: '全模态', embedding: '向量', audio: '语音' }[row.category] }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="quota" label="免费额度剩余量" min-width="170" align="center">
+              <template #default="{ row }">
+                <span style="font-family: monospace; font-size: 12px">{{ row.quota }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="expire" label="过期时间" width="120" align="center">
+              <template #default="{ row }">
+                <span :style="{ color: isExpiringSoon(row.expire) ? '#f59e0b' : '', fontWeight: isExpiringSoon(row.expire) ? 600 : '' }">
+                  {{ row.expire }}
+                </span>
+              </template>
+            </el-table-column>
+            <el-table-column prop="status" label="状态" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="row.status && row.status.includes('过期') ? 'info' : 'success'" size="small">
+                  {{ row.status || '-' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column label="说明" min-width="170" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span style="font-size: 12px; color: #94a3b8">{{ quotaRemark(row) }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column label="操作" width="90" fixed="right" align="center">
+              <template #default="{ row }">
+                <el-tooltip
+                  :disabled="!!quotaUsage(row)"
+                  content="该模型类型系统暂不支持（生图/视频/重排序），无法设为当前使用"
+                  placement="top"
+                >
+                  <span>
+                    <el-button size="small" type="primary" :disabled="!quotaUsage(row) || quotaIsCurrent(row)"
+                      @click="applyModel(row.model, row.category, quotaUsage(row)?.usage || '')">
+                      使用
+                    </el-button>
+                  </span>
+                </el-tooltip>
+              </template>
+            </el-table-column>
+          </el-table>
+        </template>
+        <div v-else-if="!quotaVisible" class="pwd-note">
+          点击上方「加载额度」查看 89 条账号免费额度（语言 14 / 视觉 11 / 全模态 0 / 向量 3 / 语音 61）
+        </div>
       </template>
 
       <!-- ===== AMD GPU Cloud 配置 ===== -->
@@ -719,10 +1034,8 @@ onUnmounted(() => {
             <el-input v-model="configForm.amd_api_base" placeholder="https://developer.amd.com.cn/radeon/v1" />
           </div>
           <div class="form-item">
-            <label>AMD 模型</label>
-            <el-select v-model="configForm.amd_model" style="width:100%">
-              <el-option v-for="m in amdModels" :key="m" :label="m" :value="m" />
-            </el-select>
+            <label>当前 AMD 模型</label>
+            <el-input v-model="configForm.amd_model" placeholder="DeepSeek-V4-Flash" />
           </div>
           <div class="form-item">
             <label>Embedding 模型</label>
@@ -730,8 +1043,84 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Qwen3.8-Flash-Next 时间窗口 -->
-        <div v-if="configForm.amd_model === 'Qwen3.8-Flash-Next'" class="qwen3-8-section">
+        <!-- AMD 模型列表（动态获取 + 计费层级） -->
+        <div class="free-models-head">
+          <div class="panel-sub" style="margin:0">
+            AMD GPU Cloud 模型列表
+            <el-button size="small" :loading="loadingAmdModels" style="margin-left:12px" @click="fetchAmdModels">
+              <el-icon><Refresh /></el-icon>&nbsp;获取模型列表
+            </el-button>
+          </div>
+          <div class="free-models-hint">
+            点击获取后，系统实时抓取 AMD 官方 <code>tokenfactory</code> 模型目录
+            （Public Free + Dedicated），并按 <b>免费 / 限时免费 / 付费（专属实例）</b> 三类计费层级标注，
+            同时调用 <code>GET /radeon/v1/models</code> 校验当前 Key 可用性。
+            大语言模型与视觉模型均可一键切换（视觉模型切换后视觉识别走 AMD），
+            立即热生效，无需重启；Qwen3.8-Flash-Next 需在可用时间窗口内。
+          </div>
+        </div>
+
+        <el-alert
+          v-if="amdModelList && !amdModelList.fetch_ok && !amdModelList.key_info?.directory_ok"
+          type="warning"
+          :closable="false"
+          style="margin-bottom:10px"
+          title="AMD 官方目录与 /models 接口均拉取失败（请检查网络 / API Key）"
+        />
+
+        <!-- AMD 分类 Tab -->
+        <div v-if="amdModelList" class="model-category-tabs">
+          <button
+            v-for="tab in amdCategoryTabs"
+            :key="tab.key"
+            class="cat-tab"
+            :class="{ active: amdCategory === tab.key }"
+            @click="amdCategory = tab.key"
+          >
+            {{ tab.label }}
+            <span class="cat-count">{{ amdCategoryCount(tab.key) }}</span>
+          </button>
+        </div>
+
+        <el-table v-if="amdModelList" :data="filteredAmdModels" size="small" max-height="380" border>
+          <el-table-column prop="id" label="模型 ID" min-width="200">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_current" type="success" size="small">当前</el-tag>
+              <span style="margin-left:6px; font-family: monospace">{{ row.id }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="150" />
+          <el-table-column label="计费" width="100" align="center">
+            <template #default="{ row }">
+              <el-tag :type="tierTag(row.tier).type" size="small">{{ tierTag(row.tier).text }}</el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="校验" width="80" align="center">
+            <template #default="{ row }">
+              <el-tooltip :content="row.verified ? '已通过 /models 接口校验，当前 Key 可调用' : '未在 /models 返回中（可能需要专属实例部署或已下线）'">
+                <el-tag :type="row.verified ? 'success' : 'info'" size="small">
+                  {{ row.verified ? '已验证' : '未验证' }}
+                </el-tag>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column prop="desc" label="说明" min-width="200" show-overflow-tooltip />
+          <el-table-column label="操作" width="90" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="row.is_current"
+                @click="applyAmdModel(row.id, row.category)"
+              >
+                使用
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <!-- Qwen3.8-Flash 系列时间窗口 -->
+        <div v-if="(configForm.amd_model || '').toLowerCase().includes('qwen3.8-flash')" class="qwen3-8-section">
           <div class="panel-sub">Qwen3.8-Flash-Next 可用时间窗口</div>
           <div class="form-grid">
             <div class="form-item">
@@ -1221,7 +1610,21 @@ onUnmounted(() => {
   font-family: ui-monospace, "Consolas", monospace;
   color: #7dd3fc;
 }
-/* ====== 百炼免费额度模型 ====== */
+/* ====== 百炼账号免费额度快照 ====== */
+.quota-login-card {
+  margin-top: 12px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.quota-summary {
+  margin-left: 14px;
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+/* ====== 百炼模型 ====== */
 .free-models-head {
   margin-top: 16px;
   display: flex;

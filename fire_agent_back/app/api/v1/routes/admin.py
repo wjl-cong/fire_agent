@@ -8,6 +8,9 @@ from fastapi import APIRouter, Depends, HTTPException
 import dotenv
 from sqlalchemy.orm import Session
 
+from app.core.amd_directory import fetch_amd_directory
+from app.core.bailian_directory import fetch_bailian_free_models
+from app.core.bailian_quota_data import get_bailian_account_quota
 from app.core.config import settings
 from app.core.database import get_db
 from app.core.llm import is_qwen3_8_available, list_provider_models
@@ -102,6 +105,19 @@ BAILIAN_CONSOLE_URLS = {
     "aliyun_benefit": "https://home.console.aliyun.com/home/dashboard/Benefit",
 }
 
+# ====== AMD GPU Cloud ======
+# 模型目录实时抓取自官方 tokenfactory 页面（app/core/amd_directory.py），
+# 计费层级（免费/限时免费/付费）由官方 badge/section 自动标注，不做本地写死。
+# tier 展示名称
+AMD_TIER_NAMES = {"free": "免费", "limited_free": "限时免费", "paid": "付费"}
+
+# AMD 开发者控制台直达链接
+AMD_CONSOLE_URLS = {
+    "console": "https://developer.amd.com.cn/",
+    "models": "https://developer.amd.com.cn/radeon",
+    "usage": "https://developer.amd.com.cn/",
+}
+
 # ====== 配置脱敏 ======
 def _mask(key: str) -> str:
     """敏感字段脱敏"""
@@ -125,6 +141,7 @@ def _current_config() -> dict:
             "llm_model": settings.LLM_MODEL,
             "embedding_model": settings.EMBEDDING_MODEL,
             # 视觉 / 语音模型
+            "vision_provider": settings.VISION_PROVIDER,
             "vision_model": settings.VISION_MODEL,
             "asr_model": settings.ASR_MODEL,
             "tts_model": settings.TTS_MODEL,
@@ -167,6 +184,7 @@ async def update_config(req: ConfigUpdate, current: User = Depends(get_current_u
         "llm_api_base": "LLM_API_BASE",
         "llm_model": "LLM_MODEL",
         "embedding_model": "EMBEDDING_MODEL",
+        "vision_provider": "VISION_PROVIDER",
         "vision_model": "VISION_MODEL",
         "asr_model": "ASR_MODEL",
         "tts_model": "TTS_MODEL",
@@ -255,10 +273,12 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
     """
     获取 LLM 提供商可用模型列表（含百炼免费额度信息、模型分类、密钥概况）
 
-    调用提供商 OpenAI 兼容 /models 端点校验当前 Key 可用模型，
-    与内置免费额度目录（5 大类）交叉比对。
-    注：百炼控制台免费额度/用量页面在阿里云账号登录态后，无公开 API 可实时抓取，
-    精确剩余额度以控制台为准（响应附控制台直达链接）。
+    - 百炼：实时解析官方计费文档的免费额度目录（官方新增/调整自动跟随），
+      并调用 /models 端点校验当前 Key 可用模型；
+      文档抓取失败时回退内置静态目录。
+    - AMD：实时抓取官方 tokenfactory 目录（免费/限时免费/付费自动标注）。
+    控制台「账号免费额度剩余量/过期时间/状态」为账号级数据，
+    由 /bailian/quota 端点配合用户 Cookie 实时获取（响应附控制台直达链接）。
     """
     if provider not in ("aliyun", "amd", "ollama"):
         provider = "aliyun"
@@ -274,15 +294,21 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
     def _row(mid: str, name: str, quota: str, validity: str, days: int, desc: str,
              category: str, is_free: bool, verified: bool, usage: str = ""):
         # 按分类匹配当前使用的模型（text→LLM / embedding→Embedding / vision→Vision / audio→ASR/TTS）
-        current_map = {
-            "text": settings.LLM_MODEL,
-            "embedding": settings.EMBEDDING_MODEL,
-            "vision": settings.VISION_MODEL,
-            "multimodal": settings.VISION_MODEL,
-        }
-        if category == "audio":
+        if provider == "amd":
+            # AMD：text→AMD_MODEL；vision→VISION_MODEL（仅当视觉提供商为 amd 时）
+            if category == "vision":
+                cur = settings.VISION_MODEL if settings.VISION_PROVIDER == "amd" else ""
+            else:
+                cur = settings.AMD_MODEL
+        elif category == "audio":
             cur = settings.TTS_MODEL if usage == "tts" else settings.ASR_MODEL
         else:
+            current_map = {
+                "text": settings.LLM_MODEL,
+                "embedding": settings.EMBEDDING_MODEL,
+                "vision": settings.VISION_MODEL if settings.VISION_PROVIDER == "aliyun" else "",
+                "multimodal": settings.VISION_MODEL if settings.VISION_PROVIDER == "aliyun" else "",
+            }
             cur = current_map.get(category, settings.LLM_MODEL)
         return {
             "id": mid, "name": name, "free_quota": quota, "validity": validity, "days": days,
@@ -304,34 +330,98 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
             return "vision"
         return "text"
 
+    def _usage_of(mid: str) -> str:
+        """推断语音模型的用途（tts / asr），用于匹配当前 ASR/TTS 配置"""
+        low = mid.lower()
+        if any(k in low for k in ("tts", "cosyvoice", "sambert", "voice-enrollment", "voice-design")):
+            return "tts"
+        if any(k in low for k in ("asr", "paraformer", "transcription")):
+            return "asr"
+        return ""
+
     models = []
     if provider == "aliyun":
-        # 1) 免费额度目录（verified = 是否在 /models 返回中）
-        for mid, info in BAILIAN_FREE_MODELS.items():
-            models.append(_row(mid, info["name"], info["quota"], info["validity"], info["days"],
-                               info["desc"], info["category"], True, mid in avail_set,
-                               info.get("usage", "")))
+        # 1) 实时解析官方计费文档的免费额度目录（官方新增/调整自动跟随）
+        directory = fetch_bailian_free_models()
+        dir_ids = set()
+        if directory:
+            for m in directory:
+                mid = m["model"]
+                dir_ids.add(mid)
+                models.append(_row(mid, mid, m["quota"], m["validity"], m["days"],
+                                   f"{m['desc']}（官方免费额度目录）", m["category"], True,
+                                   mid in avail_set, _usage_of(mid)))
+        else:
+            # 文档抓取/解析失败 → 回退内置静态目录
+            dir_ids = set(BAILIAN_FREE_MODELS)
+            for mid, info in BAILIAN_FREE_MODELS.items():
+                models.append(_row(mid, info["name"], info["quota"], info["validity"], info["days"],
+                                   info["desc"] + "（内置目录回退）", info["category"], True,
+                                   mid in avail_set, info.get("usage", "")))
         # 2) /models 中存在但不在免费目录的模型（按规则自动分类）
         for mid in available:
-            if mid in BAILIAN_FREE_MODELS:
+            if mid in dir_ids:
                 continue
             cat = _guess_category(mid)
             models.append(_row(mid, mid, "-", "-", 0, "其他可用模型（不在免费额度目录）",
                                cat, False, True))
+        directory_ok = bool(directory)
+    elif provider == "amd":
+        # 实时抓取 AMD tokenfactory 官方目录（免费/限时免费/付费自动标注），失败时回退 /models 结果
+        directory = fetch_amd_directory()
+        dir_ids = set()
+        for m in directory:
+            dir_ids.add(m["id"])
+            tier_name = AMD_TIER_NAMES.get(m["tier"], "未知")
+            desc = m["desc"] + (f"（发布方: {m['publisher']}）" if m["publisher"] else "")
+            row = _row(m["id"], m["name"], tier_name, "以控制台为准", 0,
+                       desc, m["category"], m["tier"] != "paid", m["id"] in avail_set)
+            row["tier"] = m["tier"]
+            row["tier_name"] = tier_name
+            row["vendor"] = m["publisher"]
+            row["status"] = m.get("status", "")
+            models.append(row)
+        # /models 中存在但官方目录没有的模型（按规则自动分类）
+        for mid in available:
+            if mid in dir_ids:
+                continue
+            row = _row(mid, mid, "-", "以控制台为准", 0, "接口返回的其他模型（未在官方目录中）",
+                       _guess_category(mid), False, True)
+            row["tier"] = ""
+            row["tier_name"] = "未知"
+            models.append(row)
+        directory_ok = bool(directory)
     else:
         for mid in available:
             models.append(_row(mid, mid, "-", "-", 0, "", _guess_category(mid), False, True))
 
-    # 排序：有免费额度在前（有效期长者优先）> 无额度；组内 当前使用 > 已验证
-    models.sort(key=lambda m: (
-        not m["is_free"],            # 免费额度优先
-        -m["days"],                  # 有效期长优先
-        not m["is_current"],         # 当前使用优先
-        not m["verified"],           # 已验证优先
-        m["category"] != "text",     # 大语言模型类内靠前
-    ))
+    # 排序：AMD 按计费层级（免费 > 限时免费 > 付费）> 当前使用 > 已验证；
+    # 其他提供商：有免费额度在前（有效期长者优先）> 无额度；组内 当前使用 > 已验证
+    if provider == "amd":
+        _tier_order = {"free": 0, "limited_free": 1, "paid": 2, "": 3}
+        models.sort(key=lambda m: (
+            _tier_order.get(m.get("tier", ""), 3),  # 免费优先，付费靠后
+            not m["is_current"],                    # 当前使用优先
+            not m["verified"],                       # 已验证优先
+        ))
+    else:
+        models.sort(key=lambda m: (
+            not m["is_free"],            # 免费额度优先
+            -m["days"],                  # 有效期长优先
+            not m["is_current"],         # 当前使用优先
+            not m["verified"],           # 已验证优先
+            m["category"] != "text",     # 大语言模型类内靠前
+        ))
 
     # 密钥使用概况（脱敏；额度明细无公开 API，附控制台链接）
+    if provider == "amd":
+        console_urls = AMD_CONSOLE_URLS
+        quota_note = ("模型目录实时抓取自 AMD 官方 tokenfactory 页面（免费/限时免费/付费自动标注）。"
+                      "Dedicated 专属模型（付费）需消耗自有 Credits 部署实例，精确计费以 AMD 开发者控制台为准。")
+    else:
+        console_urls = BAILIAN_CONSOLE_URLS
+        quota_note = ("阿里云未提供基于 DashScope API Key 的额度/余额查询公开接口，"
+                      "精确剩余额度与到期时间请点击控制台链接查看（需阿里云账号登录）。")
     key_info = {
         "provider": provider,
         "provider_name": {"aliyun": "阿里云百炼", "amd": "AMD GPU Cloud", "ollama": "本地 Ollama"}.get(provider, provider),
@@ -340,14 +430,16 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
         "api_base": settings.LLM_API_BASE if provider == "aliyun" else (settings.AMD_API_BASE if provider == "amd" else settings.OLLAMA_API_BASE),
         "current_model": current_model,
         "embedding_model": settings.EMBEDDING_MODEL,
+        "vision_provider": settings.VISION_PROVIDER,
         "vision_model": settings.VISION_MODEL,
         "asr_model": settings.ASR_MODEL,
         "tts_model": settings.TTS_MODEL,
         "available_count": len(available),
         "free_count": sum(1 for m in models if m["is_free"]),
-        "console_urls": BAILIAN_CONSOLE_URLS,
-        "quota_note": "阿里云未提供基于 DashScope API Key 的额度/余额查询公开接口，"
-                      "精确剩余额度与到期时间请点击控制台链接查看（需阿里云账号登录）。",
+        "console_urls": console_urls,
+        "quota_note": quota_note,
+        "qwen3_8_available": is_qwen3_8_available(),
+        "directory_ok": bool(directory_ok) if provider in ("aliyun", "amd") else None,
     }
 
     log_system_event("model", f"拉取 {provider} 模型列表: /models 返回 {len(available)} 个")
@@ -363,6 +455,19 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
             "key_info": key_info,
         },
     }
+
+
+@router.get("/bailian/quota")
+async def bailian_account_quota(current: User = Depends(get_current_user)):
+    """
+    百炼账号免费额度（静态内置快照，2026-09-02 从控制台同步）
+
+    控制台「剩余量/过期时间/状态」为账号级登录态数据、无公开 API，
+    按需求改为静态内置（app/core/bailian_quota_data.py）；
+    额度变动时更新该文件即可。模型目录本身仍实时获取（官方计费文档）。
+    """
+    data = get_bailian_account_quota()
+    return {"code": 200, "message": "success", "data": {"ok": True, **data}}
 
 
 @router.get("/status")

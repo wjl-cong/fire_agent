@@ -55,9 +55,9 @@ const navItems = computed(() =>
 
       <!-- 用户信息 / 退出 -->
       <div class="sidebar-user">
-        <div class="user-avatar" :title="auth.displayName || '用户'">
+        <router-link to="/profile" class="user-avatar" title="个人中心">
           {{ auth.displayName ? auth.displayName.charAt(0).toUpperCase() : 'U' }}
-        </div>
+        </router-link>
         <button class="logout-btn" title="退出登录" @click="handleLogout">
           ⏻
         </button>
@@ -190,7 +190,13 @@ const navItems = computed(() =>
   color: #020617;
   background: #0ea5e9;
   border-radius: 50%;
-  cursor: default;
+  cursor: pointer;
+  text-decoration: none;
+  transition: box-shadow 0.15s, transform 0.15s;
+}
+.user-avatar:hover {
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.4);
+  transform: scale(1.08);
 }
 .logout-btn {
   width: 28px;

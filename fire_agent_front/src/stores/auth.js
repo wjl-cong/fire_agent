@@ -52,11 +52,19 @@ export const useAuthStore = defineStore('auth', () => {
         _persist()
     }
 
+    /** 本地更新用户信息（个人中心保存后调用） */
+    function updateUser(partial) {
+        if (user.value) {
+            user.value = { ...user.value, ...partial }
+            _persist()
+        }
+    }
+
     function logout() {
         token.value = ''
         user.value = null
         _persist()
     }
 
-    return { token, user, isLoggedIn, displayName, login, register, logout }
+    return { token, user, isLoggedIn, displayName, login, register, logout, updateUser }
 })
