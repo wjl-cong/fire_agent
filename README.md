@@ -1,11 +1,16 @@
 # 焰哨 FlameSentry · 智慧火险预警与多智能体协作平台 —— 整体实现文档
 
 > **系统全称**：焰哨 FlameSentry · 智慧火险预警与多智能体协作平台（Smart Forest-Fire Early-Warning & Multi-Agent Collaboration Platform）
+> **现实使用名**：焰哨多Agent与可视化平台
 > **系统定位**：面向云南省森林火险治理场景，将传统 GIS 可视化大屏升级为「自然语言驱动 + 多 Agent 协作 + 知识库增强」的智能决策平台
 > **开发者**：wjl（19136220923@163.com）
 > **源码地址**（gitee）：
+>
 > - 后端：https://gitee.com/wjl2004/fire_agent_back
 > - 前端：https://gitee.com/wjl2004/fire_agent_front
+>   **系统演示**：https://wjl2004.ffuf.cn/
+> - **演示账户**： test       123456
+> - **GitHub 仓库**：https://github.com/wjl-cong/fire_agent（⭐ 欢迎 Star）
 
 ---
 

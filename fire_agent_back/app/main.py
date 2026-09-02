@@ -68,7 +68,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.VERSION,
-    description="焰哨 FlameSentry · 智慧火险预警与多智能体协作平台 · 后端服务",
+    description="焰哨多Agent与可视化平台 · 后端服务",
     lifespan=lifespan,
 )
 

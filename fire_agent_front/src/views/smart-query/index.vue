@@ -8,6 +8,7 @@ import { ref, reactive, computed, nextTick, onMounted } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import authFetch from '@/utils/authFetch'
+import { API_V1 } from '@/utils/config'
 
 // OpenLayers 地图
 import Map from 'ol/Map.js'
@@ -86,7 +87,7 @@ const exampleQueries = [
 ]
 
 // ====== 后端 API 地址 ======
-const API_BASE = 'http://localhost:8000/api/v1/query'
+const API_BASE = `${API_V1}/query`
 
 // ====== 查询历史（后端数据库持久化，按用户隔离） ======
 const loadHistory = async () => {

@@ -575,10 +575,11 @@ const activeMeasureTool = (type) => {
 // ====== 生命周期 ======
 // ====== AI 火情识别左侧栏（视觉模型 qwen-vl 系列，含历史/MD渲染/语音播报） ======
 import authFetch from '@/utils/authFetch'
+import { API_V1 } from '@/utils/config'
 import renderMarkdown from '@/utils/markdown'
 import { speakState, speakText, cleanupSpeech } from '@/utils/speech'
 
-const VISION_API = 'http://localhost:8000/api/v1/vision'
+const VISION_API = `${API_V1}/vision`
 const visionOpen = ref(false)
 const visionAnalyzing = ref(false)
 const visionFile = ref(null)
@@ -781,7 +782,7 @@ const performHeatmapAnalysis = () => {
       <div class="gis-brand-block">
         <div class="gis-logo-badge" title="GIS">GIS</div>
         <div class="gis-title-block">
-          <h1 class="gis-main-title">焰哨 · 智慧火险预警监测平台</h1>
+          <h1 class="gis-main-title">焰哨多Agent与可视化平台</h1>
           <p class="gis-sub-title">FlameSentry · Spatial Fire Risk Intelligence · Yunnan</p>
         </div>
       </div>
@@ -1123,7 +1124,7 @@ const performHeatmapAnalysis = () => {
     <!-- ======================= 底栏 ======================= -->
     <footer class="gis-footer">
       <span class="gis-footer-coord">EPSG:4326 · WGS84 · wjl · 19136220923@163.com</span>
-      <span class="gis-footer-copy">© 2026 焰哨 FlameSentry · 智慧火险预警与多智能体协作平台</span>
+      <span class="gis-footer-copy">© 2026 焰哨多Agent与可视化平台</span>
       <a class="gis-footer-link" href="https://gitee.com/wjl2004/fire_agent_front" target="_blank">Gitee</a>
     </footer>
   </div>

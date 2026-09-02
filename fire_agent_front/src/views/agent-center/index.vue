@@ -10,9 +10,10 @@ import { ElMessage } from 'element-plus'
 import authFetch from '@/utils/authFetch'
 import renderMarkdown from '@/utils/markdown'
 import { useAuthStore } from '@/stores/auth'
+import { API_V1 } from '@/utils/config'
 import { speakState, speakText, recordState, startRecord, cleanupSpeech } from '@/utils/speech'
 
-const API_BASE = 'http://localhost:8000/api/v1/agent'
+const API_BASE = `${API_V1}/agent`
 const auth = useAuthStore()
 
 // 语音输入任务：识别完成自动执行
@@ -172,7 +173,7 @@ const loadHistoryTask = async (item) => {
   // 兜底：从报告中心拉取该任务生成的报告
   if (item.reportId) {
     try {
-      const res = await authFetch(`http://localhost:8000/api/v1/reports/${item.reportId}`)
+      const res = await authFetch(`${API_V1}/reports/${item.reportId}`)
       const json = await res.json()
       if (json.code === 200) {
         taskResult.value = {

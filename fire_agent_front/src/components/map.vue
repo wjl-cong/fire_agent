@@ -141,7 +141,9 @@ const formatCoordinate = computed(() => {
 // ====== 图层声明 ======
 // 天地图底图（矢量/影像/注记三层叠加）— token 从 .env 读取
 const tiandituKey = import.meta.env.VITE_TIANDITU_KEY || '24997a7210dbb9dc59c64076193a2e10'
-const tiandituUrl = (t) => `http://t0.tianditu.com/DataServer?T=${t}_w&x={x}&y={y}&l={z}&tk=${tiandituKey}`
+// 天地图瓦片统一走同源 /tianditu 反向代理（本地=Vite 代理，线上=Nginx 代理）
+// 代理层伪装 Referer，绕开天地图白名单/证书/混合内容问题，三种地址（localhost/IP/域名）行为一致
+const tiandituUrl = (t) => `/tianditu/DataServer?T=${t}_w&x={x}&y={y}&l={z}&tk=${tiandituKey}`
 
 const tiandituVecLayer = new TileLayer({
   title: '天地图矢量图层',

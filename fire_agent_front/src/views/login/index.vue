@@ -69,7 +69,7 @@ const switchMode = (m) => {
   <div class="login-shell">
     <div class="login-bg" />
     <div class="login-card">
-      <div class="login-title">焰哨 FlameSentry · 智慧火险预警与多智能体协作平台</div>
+      <div class="login-title">焰哨多Agent与可视化平台</div>
       <div class="login-subtitle">FlameSentry · 森林火险预警智能决策系统</div>
 
       <!-- 模式切换 -->

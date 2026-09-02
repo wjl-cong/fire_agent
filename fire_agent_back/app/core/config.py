@@ -7,18 +7,20 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # 项目基本信息
-    PROJECT_NAME: str = "焰哨 FlameSentry · 智慧火险预警与多智能体协作平台"
+    PROJECT_NAME: str = "焰哨多Agent与可视化平台"
     VERSION: str = "1.0.0"
 
     # 报告署名信息（自动追加到生成的每份分析报告末尾）
     REPORT_FOOTER: str = (
         "\n\n---\n\n"
         "> **系统与开发者信息**\n"
-        "> - 系统名称：焰哨 FlameSentry · 智慧火险预警与多智能体协作平台\n"
+        "> - 系统名称：焰哨多Agent与可视化平台\n"
         "> - 开发者：wjl\n"
         "> - 联系邮箱：19136220923@163.com\n"
         "> - 后端源码：https://gitee.com/wjl2004/fire_agent_back\n"
         "> - 前端源码：https://gitee.com/wjl2004/fire_agent_front\n"
+        "> - 在线演示：https://wjl2004.ffuf.cn/\n"
+        "> - GitHub 仓库：https://github.com/wjl-cong/fire_agent (⭐ Star welcome!)\n"
     )
 
     # JWT 认证（由 .env 提供，避免硬编码）

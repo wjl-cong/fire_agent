@@ -12,8 +12,11 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Download, Delete, Refresh } from '@element-plus/icons-vue'
 import authFetch from '@/utils/authFetch'
 import renderMarkdown from '@/utils/markdown'
+import { API_V1 } from '@/utils/config'
 
-const API_BASE = 'http://localhost:8000/api/v1/reports'
+const API_BASE = `${API_V1}/reports`
+
+
 
 // ====== 列表状态 ======
 const reports = ref([])

@@ -8,9 +8,10 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, Connection, Monitor, Setting, Document, CircleCheck, CircleClose, User as UserIcon, Promotion, Cpu } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
+import { API_V1 } from '@/utils/config'
 import { useRouter } from 'vue-router'
 
-const API_BASE = 'http://localhost:8000/api/v1/admin'
+const API_BASE = `${API_V1}/admin`
 const auth = useAuthStore()
 const router = useRouter()
 

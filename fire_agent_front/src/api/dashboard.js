@@ -2,7 +2,9 @@
  * 大屏数据 API 服务
  * 通过 Vite proxy 将 /api 请求转发到后端 localhost:8000
  */
-const API_BASE = '/api/v1/dashboard'
+import { API_V1 } from '@/utils/config'
+
+const API_BASE = `${API_V1}/dashboard`
 
 async function request(url, params = {}) {
   const qs = new URLSearchParams()

@@ -37,7 +37,7 @@ const navItems = computed(() =>
     <!-- 左侧导航栏 -->
     <aside class="app-sidebar">
       <div class="sidebar-brand">
-        <span class="brand-text" title="焰哨 FlameSentry">焰</span>
+        <span class="brand-text" title="焰哨多Agent与可视化平台">焰</span>
       </div>
       <nav class="sidebar-nav">
         <router-link

@@ -93,6 +93,10 @@ class ReportRepository:
             return False
         if not is_admin and r.user_id != user_id:
             return False
+        # 解除 Agent 任务对报告的引用（保留任务历史，仅置空 report_id），
+        # 否则 PostgreSQL 外键 agent_tasks_report_id_fkey 会阻止删除
+        self.db.query(AgentTask).filter(AgentTask.report_id == report_id) \
+            .update({AgentTask.report_id: None}, synchronize_session=False)
         self.db.delete(r)
         self.db.commit()
         return True

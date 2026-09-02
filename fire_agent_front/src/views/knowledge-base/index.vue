@@ -8,6 +8,7 @@
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import authFetch from '@/utils/authFetch'
+import { API_V1 } from '@/utils/config'
 import { speakState, speakText, recordState, startRecord, cleanupSpeech } from '@/utils/speech'
 
 // 语音提问：识别完成自动提交
@@ -22,7 +23,7 @@ const handleMicClick = () => {
   })
 }
 
-const API_BASE = 'http://localhost:8000/api/v1/rag'
+const API_BASE = `${API_V1}/rag`
 
 // ====== 文档管理 ======
 const documents = ref([])
