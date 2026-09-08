@@ -84,6 +84,7 @@ class FireRepository:
                     "final_fire_index": r.final_fire_index,
                     "fire_level": r.fire_level,
                     "pred_fire_count": r.pred_fire_count,
+                    "pred_fire_risk": r.pred_fire_risk,
                     "risk_score": r.risk_score,
                     "longitude": r.longitude,
                     "latitude": r.latitude,

@@ -12,7 +12,7 @@
  Target Server Version : 140018 (140018)
  File Encoding         : 65001
 
- Date: 01/09/2026 18:16:25
+ Date: 08/09/2026 21:01:06
 */
 
 
@@ -27218,9 +27218,9 @@ COMMENT ON COLUMN "public"."users"."created_at" IS '创建时间';
 -- ----------------------------
 -- Records of users
 -- ----------------------------
-INSERT INTO "public"."users" VALUES (8, 'test', NULL, '$2b$12$1AWmIxwZWzkpETVFf8K1iusd/jNCkcFb2N0dbhYScN6EVCA8PXaDK', 'user', '2026-08-31 19:34:03.846109');
 INSERT INTO "public"."users" VALUES (10, 'wjl_2004', NULL, '$2b$12$sCS1Vns60k.wvh8mhpUQte2OEjJu19pD4AqU/otbfCpJz4WhyRVGq', 'user', '2026-09-01 12:59:49.584115');
 INSERT INTO "public"."users" VALUES (6, 'admin', NULL, '$2b$12$WK1cZWCKDp8Kkcm/pHXqEe/XGQ8.iJTbr5FgZl.wMr47P/e74OZ42', 'admin', '2026-08-31 14:39:15.600916');
+INSERT INTO "public"."users" VALUES (8, 'test', NULL, '$2b$12$FyUwEorPZcBNwRe3le9BI.ISZbuqlU/Lp.4PaiYFVrXyZIvGdmW1a', 'user', '2026-08-31 19:34:03.846109');
 
 -- ----------------------------
 -- Table structure for vision_history

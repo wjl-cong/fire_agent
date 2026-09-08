@@ -6,7 +6,6 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.models.report import AnalysisReport
-from app.models.task import AgentTask
 from app.schemas.report import ReportGenerateRequest
 
 
@@ -35,14 +34,16 @@ class ReportRepository:
 
     def list(self, page: int = 1, page_size: int = 20, report_type: str = None,
              user_id: int = None, is_admin: bool = False) -> dict:
-        """分页查询报告列表（不含正文，省流量）— 普通用户仅自己的，管理员全部
+        """分页查询报告列表（不含正文，省流量）
 
-        注意：普通用户严格只看到 user_id == 当前用户 的报告，
-        不再包含旧版无归属（NULL）记录，避免普通用户互相看到对方的历史报告。
+        可见性规则（软删除）：
+        - 普通用户：仅自己的报告，且未被自己删除（hidden）、未被管理员删除（deleted）
+        - 管理员：所有人的报告（含用户自删 hidden 的），但自己删除过（deleted）的除外
         """
-        q = self.db.query(AnalysisReport)
+        q = self.db.query(AnalysisReport).filter(AnalysisReport.deleted == False)  # noqa: E712
         if not is_admin:
-            q = q.filter(AnalysisReport.user_id == user_id)
+            q = q.filter(AnalysisReport.user_id == user_id,
+                         AnalysisReport.hidden == False)  # noqa: E712
         if report_type:
             q = q.filter(AnalysisReport.report_type == report_type)
         total = q.count()
@@ -62,18 +63,29 @@ class ReportRepository:
                     "summary": r.summary,
                     "tags": r.tags,
                     "status": r.status,
+                    "owner_hidden": bool(r.hidden),
                     "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
                 }
                 for r in items
             ],
         }
 
-    def get(self, report_id: int, user_id: int = None, is_admin: bool = False) -> dict:
-        """查询单条报告详情（仅本人或管理员可见）"""
+    def get(self, report_id: int, user_id: int = None, is_admin: bool = False,
+            include_deleted: bool = False) -> dict:
+        """查询单条报告详情（仅本人或管理员可见）
+
+        include_deleted=True 供 Agent 任务详情使用：即使报告在报告中心被删除，
+        多 Agent 协作历史仍能查看报告内容（两个模块互不影响）。
+        """
         r = self.db.query(AnalysisReport).filter(AnalysisReport.id == report_id).first()
         if not r:
             return None
-        if not is_admin and r.user_id != user_id:
+        if not include_deleted:
+            if r.deleted:
+                return None
+            if not is_admin and (r.user_id != user_id or r.hidden):
+                return None
+        elif not is_admin and r.user_id != user_id:
             return None
         return {
             "id": r.id,
@@ -87,17 +99,22 @@ class ReportRepository:
         }
 
     def delete(self, report_id: int, user_id: int = None, is_admin: bool = False) -> bool:
-        """删除报告（仅本人或管理员）"""
+        """删除报告（软删除，仅改标记，不动 Agent 任务引用）
+
+        - 管理员删除：deleted=True → 所有人在报告中心都看不到
+        - 普通用户删除自己的：hidden=True → 仅该用户在报告中心看不到，
+          管理员仍可见（owner_hidden 标记）；多 Agent 任务详情不受影响
+        """
         r = self.db.query(AnalysisReport).filter(AnalysisReport.id == report_id).first()
         if not r:
             return False
         if not is_admin and r.user_id != user_id:
             return False
-        # 解除 Agent 任务对报告的引用（保留任务历史，仅置空 report_id），
-        # 否则 PostgreSQL 外键 agent_tasks_report_id_fkey 会阻止删除
-        self.db.query(AgentTask).filter(AgentTask.report_id == report_id) \
-            .update({AgentTask.report_id: None}, synchronize_session=False)
-        self.db.delete(r)
+        if is_admin:
+            r.deleted = True
+        else:
+            r.hidden = True
+        r.updated_at = datetime.now()
         self.db.commit()
         return True
 
@@ -120,6 +137,7 @@ class ReportRepository:
             existing.report_type = report_type
             if tags:
                 existing.tags = tags
+            existing.hidden = False  # 重新生成视为新报告，恢复归属用户可见
             existing.updated_at = now
             self.db.commit()
             self.db.refresh(existing)

@@ -78,18 +78,19 @@ def _make_nodes(db_session, user_id=None, is_admin=False):
                       "output": {"plan": plan}, "status": "completed", "summary": "任务拆解完成"})
         return {"parsed_intent": {"plan": plan}, "steps": steps, "status": "parsed"}
 
-    # ---------- 节点2：数据查询（真实调用 DataAgent） ----------
+    # ---------- 节点2：数据查询（真实调用 DataAgent，支持历史火点/预测火险） ----------
     def query_data(state: AgentState) -> dict:
-        from app.schemas.dashboard import HistoryFireQuery
+        from app.schemas.dashboard import HistoryFireQuery, PredictRiskQuery
         steps = state.get("steps", [])
         query = state["user_query"]
         data = {"status": "no_data", "total": 0, "items": []}
         try:
-            # 抽取年份/城市（简化：从任务描述中解析，含年份则查询历史火点）
             import re
-            year_m = re.search(r"(20\d{2})", query)
+            years = re.findall(r"(20\d{2})", query)
+            month_m = re.search(r"(\d{1,2})月", query)
+            month = int(month_m.group(1)) if month_m and 1 <= int(month_m.group(1)) <= 12 else None
             city = None
-            from app.services.query_service import CITIES, SHORT_CITY_MAP
+            from app.services.query_service import CITIES, SHORT_CITY_MAP, CITY_CENTERS
             for c in CITIES:
                 if c in query:
                     city = c
@@ -99,38 +100,117 @@ def _make_nodes(db_session, user_id=None, is_admin=False):
                     if short in query:
                         city = full
                         break
-            q = HistoryFireQuery(
-                start_date=f"{year_m.group(1)}-01-01" if year_m else None,
-                end_date=f"{year_m.group(1)}-12-31" if year_m else None,
+            year = int(years[0]) if len(years) == 1 else None
+
+            # 1) 历史火点（historical_fire_points 表，覆盖 2021-2025）
+            hq = HistoryFireQuery(
+                start_date=f"{year}-01-01" if year else None,
+                end_date=f"{year}-12-31" if year else None,
+                city=city,
+                page_size=5000,
+            )
+            hist = fire_repo.query_history_fires(hq)
+            hist_items = []
+            for it in hist.get("items", []):
+                it = dict(it)
+                it["source"] = "historical"
+                hist_items.append(it)
+
+            # 2) 预测火险（predicted_fire_risks 表，覆盖 2025-2026；双源查询避免漏数据）
+            view_mode = "daily" if any(k in query for k in ("逐日", "每日", "日报", "当天")) else "monthly"
+            pq = PredictRiskQuery(
+                year=year if year and 2025 <= year <= 2026 else None,
+                month=month if view_mode == "monthly" else None,
+                view_mode=view_mode,
                 city=city,
             )
-            data = fire_repo.query_history_fires(q)
-            data["status"] = "queried"
+            pred = fire_repo.query_predict_risks(pq)
+            pred_items = []
+            for it in pred.get("items", []):
+                lng, lat = it.get("longitude"), it.get("latitude")
+                if lng is None or lat is None:
+                    center = CITY_CENTERS.get(it.get("city"))
+                    if center:
+                        lng, lat = center
+                day = it.get("day")
+                date_str = f"{it.get('year')}-{it.get('month'):02d}" + (f"-{day:02d}" if day else "")
+                pred_items.append({
+                    "id": it.get("id"),
+                    "acq_date": date_str,
+                    "frp": it.get("pred_fire_risk") or it.get("pred_fire_count") or it.get("final_fire_index") or 0,
+                    "longitude": lng,
+                    "latitude": lat,
+                    "city": it.get("city"),
+                    "risk_score": it.get("risk_score"),
+                    "fire_level": it.get("fire_level"),
+                    "source": "predicted",
+                })
+
+            hist_total = hist.get("total", 0)
+            pred_total = len(pred_items)
+            data = {
+                "status": "queried",
+                "total": hist_total + pred_total,
+                "hist_total": hist_total,
+                "pred_total": pred_total,
+                "items": hist_items + pred_items,
+                "data_type": f"历史火点({hist_total})+预测火险({pred_total})",
+            }
+            summary = (f"DataAgent 查询到 {hist_total} 条历史火点(覆盖2021-2025) "
+                       f"+ {pred_total} 条{view_mode}预测火险(覆盖2025-2026)，"
+                       f"共 {hist_total + pred_total} 条（均来自数据库）")
         except Exception as e:
             data = {"status": "error", "total": 0, "items": [], "error": str(e)}
+            summary = f"DataAgent 查询失败: {str(e)[:50]}"
 
         steps.append({"step": "query_data", "agent": "DataAgent", "input": query,
-                      "output": {"total": data.get("total", 0), "first_city": (data.get("items") or [{}])[0].get("city") if data.get("items") else None},
+                      "output": {"total": data.get("total", 0),
+                                 "first_city": (data.get("items") or [{}])[0].get("city") if data.get("items") else None},
                       "status": "completed",
-                      "summary": f"DataAgent 查询到 {data.get('total', 0)} 条历史火点"})
+                      "summary": summary})
         return {"data_results": data, "steps": steps, "status": "data_ready"}
 
-    # ---------- 节点3：GIS 分析（真实调用 GisAgent） ----------
+    # ---------- 节点3：GIS 分析（历史火点网格聚类 + 预测数据高风险识别，双源合并） ----------
     def analyze_gis(state: AgentState) -> dict:
         steps = state.get("steps", [])
+        data = state.get("data_results", {}) or {}
         gis = {"status": "no_data", "hotspots": [], "summary": "无数据"}
         try:
-            gis = asyncio_run(gis_agent.analyze_hotspots(state.get("data_results", {})))
-            gis["status"] = "analyzed"
+            items = data.get("items", []) or []
+            hist_items = [i for i in items if i.get("source") != "predicted"]
+            pred_items = [i for i in items if i.get("source") == "predicted"]
+            hotspots = []
+            hist_count = pred_count = 0
+            if hist_items:
+                h = asyncio_run(gis_agent.analyze_hotspots({"items": hist_items}))
+                for x in h.get("hotspots", []):
+                    x["kind"] = "历史聚类"
+                hist_count = h.get("total_hotspots", 0)
+                hotspots.extend(h.get("hotspots", []))
+            if pred_items:
+                p = asyncio_run(gis_agent.analyze_predicted({"items": pred_items}))
+                for x in p.get("hotspots", []):
+                    x["kind"] = "预测高风险"
+                pred_count = p.get("total_hotspots", 0)
+                hotspots.extend(p.get("hotspots", []))
+            gis = {
+                "status": "analyzed",
+                "hotspots": hotspots[:40],
+                "total_hotspots": hist_count + pred_count,
+                "hist_hotspots": hist_count,
+                "pred_hotspots": pred_count,
+                "summary": f"识别到 {hist_count + pred_count} 个热点区域（历史聚类 {hist_count} 个 + 预测高风险 {pred_count} 个）",
+            }
         except Exception as e:
             gis = {"status": "error", "hotspots": [], "summary": str(e)}
 
         steps.append({"step": "analyze_gis", "agent": "GisAgent",
-                      "input": f"对 {state.get('data_results', {}).get('total', 0)} 条火点做网格聚类",
+                      "input": f"对 {state.get('data_results', {}).get('total', 0)} 条数据做空间分析（历史网格聚类+预测风险识别）",
                       "output": {"hotspots": gis.get("hotspots", [])[:5],
                                  "total_hotspots": gis.get("total_hotspots", 0)},
                       "status": "completed",
-                      "summary": f"GisAgent 识别到 {gis.get('total_hotspots', 0)} 个热点区域"})
+                      "summary": f"GisAgent 识别到 {gis.get('total_hotspots', 0)} 个热点区域"
+                                 f"（历史聚类 {gis.get('hist_hotspots', 0)} + 预测高风险 {gis.get('pred_hotspots', 0)}）"})
         return {"gis_results": gis, "steps": steps, "status": "gis_ready"}
 
     # ---------- 节点4：知识库检索（真实调用 RagAgent/RagService） ----------
@@ -170,54 +250,70 @@ def _make_nodes(db_session, user_id=None, is_admin=False):
 
         # 汇总真实数据
         data_total = data.get("total", 0)
+        hist_total = data.get("hist_total", 0)
+        pred_total = data.get("pred_total", 0)
         items = data.get("items", []) or []
         top_cities = {}
         for it in items:
             c = it.get("city")
             if c:
                 top_cities[c] = top_cities.get(c, 0) + 1
-        top_cities_str = ", ".join(f"{c}({n})" for c, n in sorted(top_cities.items(), key=lambda x: -x[1])[:5]) or "无"
+        top_cities_str = ", ".join(f"{c}({n})" for c, n in sorted(top_cities.items(), key=lambda x: -x[1])[:10]) or "无"
 
         hotspots = gis.get("hotspots", []) or []
         hotspot_str = "; ".join(
-            f"[{h.get('lng', 0):.2f},{h.get('lat', 0):.2f}] 火点{h.get('count', 0)}个/平均FRP{h.get('avg_frp', 0)}"
-            for h in hotspots[:5]
+            (f"[{h.get('kind', '热点')}] " if h.get("kind") else "")
+            + (f"{h.get('city')} " if h.get("city") else "")
+            + f"[{h.get('lng', 0):.2f},{h.get('lat', 0):.2f}] 火点{h.get('count', 0)}个/平均FRP{h.get('avg_frp', 0)}"
+            + (f"/风险评分{h.get('risk_score', 0)}" if h.get("risk_score") is not None else "")
+            for h in hotspots[:12]
         ) or "无"
 
         kb_str = "\n".join(
-            f"- （{k.get('document', '未知')}，相关度{k.get('score', 0)}）{k.get('content', '')[:100]}"
-            for k in knowledge[:3]
+            f"- （{k.get('document', '未知')}，相关度{k.get('score', 0)}）{k.get('content', '')[:150]}"
+            for k in knowledge[:5]
         ) or "无"
 
         if llm_available():
-            llm = get_llm(temperature=0.3)
-            prompt = f"""你是一个森林火险分析报告生成助手（ReportAgent）。请根据以下真实数据生成专业的分析报告。
+            llm = get_llm(temperature=0.4, max_tokens=4000)
+            prompt = f"""你是资深森林防火专家（ReportAgent），为森林防火指挥中心撰写正式分析报告。请根据以下多 Agent 协作产出的真实数据，撰写一份**详尽、专业、直击重点**的 Markdown 分析报告。
 
 用户需求：{query}
 
-## 真实数据（DataAgent 查询结果）
-- 历史火点总数：{data_total} 条
-- 火点分布（Top 城市）：{top_cities_str}
+## DataAgent 查询结果（真实数据库数据）
+- 数据构成：历史火点 {hist_total} 条（覆盖2021-2025，NASA FIRMS 卫星观测）+ 预测火险 {pred_total} 条（覆盖2025-2026，模型预测）
+- 记录总数：{data_total} 条
+- 火点/风险分布（按州市统计）：{top_cities_str}
 
-## GIS 热点分析（GisAgent 分析结果）
-- 热点区域：{hotspot_str}
+## GisAgent 空间分析结果
+- 热点区域明细：{hotspot_str}
 
-## 知识库参考（RagAgent 检索结果）
+## RagAgent 知识库检索（防火规范/预案参考）
 { kb_str }
 
-请生成一份 Markdown 格式的报告，必须基于以上真实数据，包含：
-1. 概述
-2. 数据分析结果（引用上面的真实数字）
-3. 风险区域识别（引用热点区域）
-4. 处置建议
-5. 参考依据（引用知识库片段）"""
+## 撰写要求（必须严格遵守）
+1. **所有数字必须直接引用上面的真实数据**，禁止编造；数据为 0 的部分要说明原因（如该时段无历史记录、以预测数据为准）。
+2. 报告结构（Markdown，用二级/三级标题）：
+   - 一、执行摘要：3-5 句话点明核心结论（哪里最危险、为什么、建议干什么）
+   - 二、数据来源与分析方法：说明历史/预测双数据源构成与分析流程
+   - 三、火情数据分析：分州市引用统计数字，指出高发区域和时段规律
+   - 四、高风险区域识别：逐一分析每个热点区域（位置、火点数/风险评分、风险成因）
+   - 五、重点巡防建议：**分区域给出可执行的具体措施**——巡防时段（结合火险等级）、重点地段、卡口设置、瞭望监测、力量部署、物资准备、宣传管控
+   - 六、结论与展望
+   - 附：参考依据（引用知识库片段与相关度）
+3. 篇幅要求：**不少于 800 字**，重点区域分析要具体到州市名称和数据，巡防建议要能直接落地执行。
+4. 语言风格：正式公文风格，直接陈述，不用客套话。
+
+仅输出 Markdown 报告正文。"""
             try:
                 resp = llm.invoke(prompt)
                 report = resp.content if hasattr(resp, "content") else str(resp)
             except Exception as e:
-                report = _template_report(query, data_total, top_cities_str, hotspot_str, kb_str) + f"\n\n> LLM 调用异常：{e}"
+                report = _template_report(query, data_total, hist_total, pred_total,
+                                          top_cities_str, hotspot_str, kb_str) + f"\n\n> LLM 调用异常：{e}"
         else:
-            report = _template_report(query, data_total, top_cities_str, hotspot_str, kb_str)
+            report = _template_report(query, data_total, hist_total, pred_total,
+                                      top_cities_str, hotspot_str, kb_str)
 
         steps.append({"step": "generate_report", "agent": "ReportAgent", "input": query,
                       "output": {"report_length": len(report)}, "status": "completed",
@@ -229,21 +325,32 @@ def _make_nodes(db_session, user_id=None, is_admin=False):
     return parse_task, query_data, analyze_gis, retrieve_knowledge, generate_report
 
 
-def _template_report(query, data_total, top_cities, hotspot, kb) -> str:
-    """无 LLM 时的模板报告（仍含真实数据）"""
+def _template_report(query, data_total, hist_total, pred_total, top_cities, hotspot, kb) -> str:
+    """无 LLM 时的模板报告（仍含真实数据，结构完整）"""
     return f"""# 火险分析报告
 
-## 概述
-基于用户查询「{query}」的多 Agent 协作分析结果。
+## 一、执行摘要
+基于用户查询「{query}」，系统完成 DataAgent（数据查询）→ GisAgent（空间分析）→ RagAgent（知识检索）多 Agent 协作分析，共获取 {data_total} 条真实数据并识别风险区域，具体如下。
 
-## 数据分析结果（DataAgent）
-- 历史火点总数：{data_total} 条
-- 火点分布（Top 城市）：{top_cities}
+## 二、数据来源与分析方法
+- 历史火点数据：{hist_total} 条（NASA FIRMS 卫星观测，覆盖2021-2025）
+- 预测火险数据：{pred_total} 条（模型预测，覆盖2025-2026）
+- 分析方法：历史火点经纬度 0.1° 网格聚类识别聚集区；预测数据按火险等级识别高风险州市
 
-## 风险区域识别（GisAgent）
-- 热点区域：{hotspot}
+## 三、火情数据分析
+- 记录总数：{data_total} 条
+- 火点/风险分布（按州市统计）：{top_cities}
 
-## 参考依据（RagAgent）
+## 四、高风险区域识别
+- 热点区域明细：{hotspot}
+
+## 五、重点巡防建议
+1. 对上述热点区域所在的州市提高巡查频次，火险等级 4 级以上区域实行每日巡护；
+2. 在高火险时段（10:00-18:00）加强瞭望监测与卡口检查；
+3. 预置扑火队伍与物资至重点乡镇，检查风力灭火机、水泵等装备；
+4. 结合知识库规范开展防火宣传与野外用火管控。
+
+## 附：参考依据（RagAgent）
 { kb if kb != "无" else "- 知识库未命中相关内容" }
 
 > 注：LLM 未配置，此报告由模板生成但包含真实检索与分析数据。"""
@@ -383,7 +490,7 @@ def _make_fallback_nodes():
 
     def generate_report(state: AgentState) -> dict:
         steps = state.get("steps", [])
-        report = _template_report(state["user_query"], 0, "无", "无", "无") + settings.REPORT_FOOTER
+        report = _template_report(state["user_query"], 0, 0, 0, "无", "无", "无") + settings.REPORT_FOOTER
         steps.append({"step": "generate_report", "agent": "ReportAgent", "input": state["user_query"],
                       "output": {"report_length": len(report)}, "status": "completed",
                       "summary": "ReportAgent 生成报告（无数据库）"})

@@ -52,6 +52,7 @@ class PredictRiskPoint(BaseModel):
     final_fire_index: float | None
     fire_level: int | None
     pred_fire_count: float | None
+    pred_fire_risk: float | None
     risk_score: float | None
     longitude: float | None
     latitude: float | None

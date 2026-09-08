@@ -83,11 +83,12 @@ async def get_task(
             "summary": out.get("summary", "") or out.get("error", ""),
         })
 
-    # 报告内容（有关联报告时）
+    # 报告内容（有关联报告时；include_deleted：报告中心删除不影响 Agent 历史查看）
     report = ""
     llm_used = False
     if t.report_id:
-        rep = ReportRepository(db).get(t.report_id, user_id=t.user_id, is_admin=True)
+        rep = ReportRepository(db).get(t.report_id, user_id=t.user_id, is_admin=True,
+                                       include_deleted=True)
         if rep:
             report = rep.get("content", "") or ""
             llm_used = "LLM" in (rep.get("tags") or [])

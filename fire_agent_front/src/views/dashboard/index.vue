@@ -102,7 +102,7 @@ async function loadDashboardData() {
         City: item.city,
         Year: item.year,
         Month: item.month,
-        Pred_Fire_Risk: item.risk_score,
+        Pred_Fire_Risk: item.pred_fire_risk ?? item.risk_score,
         Risk_Score: item.risk_score,
       }))
     }
