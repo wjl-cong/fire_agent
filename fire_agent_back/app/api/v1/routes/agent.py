@@ -235,12 +235,29 @@ def _save_task_report(db: Session, task: AgentTask, query: str, report_data: str
     repo = ReportRepository(db)
     body = report_data if isinstance(report_data, str) else str(report_data)
     audit = audit or {}
+    report_tags = ["Agent生成", "LLM" if llm_used else "模板"]
+    report_type = _classify_report_type(query)
+    report_summary = f"任务：{query[:80]}"
+    # 同一任务重跑：优先按 task.report_id 覆盖旧报告，报告中心只保留最后一次成功的结果
+    # （query 措辞变化会导致标题不同，仅按标题去重会漏 → 产生多条中间记录）
+    if task.report_id and repo.overwrite(
+        task.report_id,
+        content=body,
+        summary=report_summary,
+        report_type=report_type,
+        tags=report_tags,
+        llm_provider=audit.get("llm_provider"),
+        llm_model=audit.get("llm_model"),
+        llm_tokens=audit.get("llm_tokens"),
+        llm_degraded=bool(audit.get("llm_degraded")),
+    ):
+        return
     report = repo.upsert_from_task(
         title=f"{title}{days_str}",
         content=body,
-        summary=f"任务：{query[:80]}",
-        report_type=_classify_report_type(query),
-        tags=["Agent生成", "LLM" if llm_used else "模板"],
+        summary=report_summary,
+        report_type=report_type,
+        tags=report_tags,
         user_id=task.user_id,
         llm_provider=audit.get("llm_provider"),
         llm_model=audit.get("llm_model"),

@@ -374,7 +374,8 @@ onUnmounted(() => {
             <div class="report-item-title">{{ item.title }}</div>
             <div class="report-item-summary">{{ item.summary || '暂无摘要' }}</div>
             <div class="report-item-bottom">
-              <span class="report-item-time">{{ item.created_at }}</span>
+              <!-- 重生成走 upsert：created_at 不变、updated_at 刷新，优先展示更新时间避免"新报告像旧的" -->
+              <span class="report-item-time">{{ item.updated_at && item.updated_at !== item.created_at ? '更新于 ' + item.updated_at : item.created_at }}</span>
             </div>
           </div>
 

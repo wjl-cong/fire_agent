@@ -51,7 +51,9 @@ class ReportRepository:
         if report_type:
             q = q.filter(AnalysisReport.report_type == report_type)
         total = q.count()
-        items = q.order_by(AnalysisReport.created_at.desc()) \
+        # 按 updated_at 倒序：Agent 重生成同标题报告走 upsert（只刷 updated_at、不动 created_at），
+        # 若按 created_at 排序，重新生成的报告会沉底，用户会误以为「报告中心没有新报告」
+        items = q.order_by(AnalysisReport.updated_at.desc()) \
                  .offset((page - 1) * page_size) \
                  .limit(page_size) \
                  .all()
@@ -72,6 +74,7 @@ class ReportRepository:
                     "llm_model": r.llm_model,
                     "llm_degraded": bool(r.llm_degraded),
                     "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+                    "updated_at": r.updated_at.strftime("%Y-%m-%d %H:%M:%S") if r.updated_at else None,
                 }
                 for r in items
             ],
@@ -154,7 +157,9 @@ class ReportRepository:
             existing.report_type = report_type
             if tags:
                 existing.tags = tags
-            existing.hidden = False  # 重新生成视为新报告，恢复归属用户可见
+            existing.hidden = False   # 重新生成视为新报告，恢复归属用户可见
+            existing.deleted = False  # 同理必须复位删除标记：否则之前删过同标题报告的用户
+                                      # 重新生成后报告中心永远看不到，会误以为「没有生成」
             existing.llm_provider = llm_provider
             existing.llm_model = llm_model
             existing.llm_tokens = llm_tokens
@@ -177,3 +182,33 @@ class ReportRepository:
             ),
             user_id=user_id,
         )
+
+    def overwrite(self, report_id: int, content: str, summary: str = None,
+                  report_type: str = "special", tags: list = None,
+                  llm_provider: str = None, llm_model: str = None,
+                  llm_tokens: dict = None, llm_degraded: bool = False) -> bool:
+        """同一任务重跑：按 task.report_id 直接覆盖旧报告（报告中心只保留最后一次成功的结果）
+
+        任务重跑时查询措辞稍有变化就会导致标题不同，按标题去重会漏而产生多条
+        中间记录；按任务绑定的 report_id 覆盖则无论重跑多少次都只有一条。
+        重新生成即视为用户主动需要最新版本，hidden/deleted 一律复位可见。
+        """
+        r = self.db.query(AnalysisReport).filter(AnalysisReport.id == report_id).first()
+        if not r:
+            return False
+        r.content = content
+        if summary:
+            r.summary = summary
+        r.report_type = report_type
+        if tags:
+            r.tags = tags
+        r.hidden = False
+        r.deleted = False
+        r.llm_provider = llm_provider
+        r.llm_model = llm_model
+        r.llm_tokens = llm_tokens
+        r.llm_degraded = bool(llm_degraded)
+        r.updated_at = datetime.now()
+        self.db.commit()
+        self.db.refresh(r)
+        return True

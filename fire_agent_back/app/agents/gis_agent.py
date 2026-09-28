@@ -2,6 +2,22 @@
 GIS 分析 Agent — 空间分析工具
 """
 import json
+import math
+
+from app.services.query_service import CITY_CENTERS
+
+
+def _nearest_city(lng: float, lat: float) -> str:
+    """坐标 → 最近州市中心（经度距离按纬度余弦修正），为热点网格标注真实属地。
+
+    必须由数据侧标注属地：LLM 仅凭经纬度会编造地名（如把普洱写成横断山区）。
+    """
+    best, best_d = None, float("inf")
+    for name, (clng, clat) in CITY_CENTERS.items():
+        d = ((lng - clng) * math.cos(math.radians(lat))) ** 2 + (lat - clat) ** 2
+        if d < best_d:
+            best, best_d = name, d
+    return best or ""
 
 
 class GisAgent:
@@ -29,6 +45,7 @@ class GisAgent:
         for key, g in grid.items():
             g["avg_frp"] = round(g["frp_sum"] / g["count"], 2) if g["count"] > 0 else 0
             if g["count"] >= 2:  # 至少2个火点才算热点
+                g["city"] = _nearest_city(g["lng"], g["lat"])
                 hotspots.append(g)
 
         hotspots.sort(key=lambda x: x["count"], reverse=True)

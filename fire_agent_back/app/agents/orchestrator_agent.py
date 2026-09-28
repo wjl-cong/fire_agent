@@ -118,10 +118,13 @@ def _stream_report(prompt: str, task_id: int):
                 buf.append(chunk.get("text", ""))
                 report_channels.push_delta(task_id, run, chunk.get("text", ""))
             elif ctype == "meta":
-                result = LLMResult(text="".join(buf), provider=chunk.get("provider", ""),
-                                   tokens=chunk.get("tokens") or {},
-                                   degraded=bool(chunk.get("degraded")),
-                                   model=chunk.get("model", ""))
+                # 全程 0 字符的"成功"（如思考型模型 token 全花在 reasoning、content 为空）
+                # 视为失败：result 置 None，让调用方走非流式/模板兜底，避免落库空报告
+                if buf:
+                    result = LLMResult(text="".join(buf), provider=chunk.get("provider", ""),
+                                       tokens=chunk.get("tokens") or {},
+                                       degraded=bool(chunk.get("degraded")),
+                                       model=chunk.get("model", ""))
                 break
             elif ctype == "error":
                 break
@@ -552,41 +555,45 @@ def _make_nodes(db_session, user_id=None, is_admin=False, task_id=None):
 ## 报告模板（强制：所有报告必须一字不差地套用以下固定模板，章节标题、顺序、数量都不可改动）
 # 云南森林火险分析报告
 ## 一、执行摘要
-（3-5 句话点明核心结论：哪里最危险、为什么、建议干什么）
+（用「1. 2. 3.」分条列出 3-5 条核心结论：哪里最危险（州市/热点名）、为什么（数据依据）、建议干什么）
 ## 二、数据来源与分析方法
-（说明历史/预测双数据源构成与分析流程）
+（分条列举：历史火点数据源与时间范围、预测数据源与模型口径、空间分析方法、天气数据源；每条注明数据时间口径）
 ## 三、火情数据分析
-（分州市引用统计数字，指出高发区域和时段规律）
+（先用 Markdown 表格呈现「表 1：各州市火点/风险统计」（列：州市、历史火点数、预测风险数、风险等级），表格下方必须有「表 1 说明：」段落解读数据揭示的规律；再分条详述高发区域与时段规律，每条先给数字后阐释成因）
 ## 四、高风险区域识别
-（逐一分析每个热点区域：位置、火点数/风险评分、风险成因）
+（逐个热点区域分条列举，每条格式「N. 所属州市[坐标]：火点数/平均FRP/风险评分——成因阐释」；区域定位必须使用数据中标注的所属州市名称，**严禁仅凭经纬度自行推断地名**；植被、地形类成因若无数据或知识库支撑，写明「待实地核查」，禁止臆断）
 ## 五、重点巡防建议
-（分区域给出可执行的具体措施——巡防时段（结合火险等级）、重点地段、卡口设置、瞭望监测、力量部署、物资准备、宣传管控）
+（分区域分条给出可执行措施——巡防时段（结合火险等级）、重点地段、卡口设置、瞭望监测、力量部署、物资准备、宣传管控；每条建议后用一句话说明依据）
 ## 六、结论与展望
 ## 附：参考依据
-（引用知识库片段与相关度；无检索结果时写明"本次未检索到匹配知识库文档"）
+（编号列举所有引用来源，每条注明来源类型（知识库文档/历史火点统计/模型预测/高德实时天气）+ 名称或片段主题 + 相似度/时间口径；无检索结果时写明"本次未检索到匹配知识库文档"）
 
 ## 撰写要求（必须严格遵守）
 1. **所有数字必须直接引用上面的真实数据**，禁止编造；数据为 0 的部分要说明原因（如该时段无历史记录、以预测数据为准）。
 2. **模板刚性**：上面是唯一合法的报告结构——七个章节的标题文字与顺序完全固定，每章必须有内容（数据为空时写明原因），不得省略、合并、改名或新增章节。
-3. 篇幅要求：**不少于 800 字**，重点区域分析要具体到州市名称和数据，巡防建议要能直接落地执行。
-4. 语言风格：正式公文风格，直接陈述，不用客套话。
+3. **表达形式**：全文以分条列举为主，每条做到「结论 + 数据 + 阐释」三要素齐全；关键统计必须用 Markdown 表格呈现并配「表 N 说明」图注文字；禁止整段泛泛而谈。
+4. 篇幅要求：**不少于 800 字**，重点区域分析要具体到州市名称和数据，巡防建议要能直接落地执行。
+5. 语言风格：正式公文风格，直接陈述，不用客套话。
+6. 报告头部的「报告生成时间」由系统自动注入，无需你撰写任何时间信息。
 
 仅输出 Markdown 报告正文。"""
             try:
                 res = None
                 if settings.LLM_STREAM_ENABLED and task_id is not None:
-                    # P2#18 流式生成（增量经 report_channels 实时推送 SSE）；失败返回 None 走非流式兜底
+                    # P2#18 流式生成（增量经 report_channels 实时推送 SSE）；失败/0 字符返回 None 走非流式兜底
                     res = _stream_report(prompt, task_id)
+                    if res is not None and not (res.text or "").strip():
+                        res = None  # 流式 0 字符（思考型模型 content 为空等）→ 必须兜底重试
                 if res is None:
                     res = invoke_llm(prompt, temperature=0.4, max_tokens=4000)
-                if res is not None:
+                if res is not None and (res.text or "").strip():
                     report = res.text
                     audit = {"llm_provider": res.provider, "llm_model": res.model,
                              "llm_degraded": res.degraded}
                     if res.tokens:
                         audit["tokens"] = res.tokens
                 else:
-                    # 所有 Provider 均不可用 → 模板兜底
+                    # 所有 Provider 均不可用或均返回空内容 → 模板兜底，保证报告正文永不为空
                     report = _template_report(query, data_total, hist_total, pred_total,
                                               top_cities_str, hotspot_str, kb_str)
                     audit = {}
@@ -605,8 +612,11 @@ def _make_nodes(db_session, user_id=None, is_admin=False, task_id=None):
         step = {"step": "generate_report", "agent": "ReportAgent", "input": query,
                 "output": {"report_length": len(report), **audit}, "status": "completed",
                 "summary": summary}
-        # 统一追加系统署名（开发者信息 + 项目地址）
-        report = report + settings.REPORT_FOOTER
+        # 系统注入报告生成时间（不依赖 LLM，避免时间幻觉）；统一追加系统署名（开发者信息 + 项目地址）
+        from datetime import datetime
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        report = (f"> 报告生成时间：{generated_at} ｜ 数据构成：历史火点 {hist_total} 条 · 预测火险 {pred_total} 条\n\n"
+                  + report + settings.REPORT_FOOTER)
         return {"report": report, "steps": [step], "status": "completed"}
 
     # ---------- 节点7：质量评审（LLM 评审 + 硬护栏；不通过带意见回 generate_report，最多 2 轮） ----------
