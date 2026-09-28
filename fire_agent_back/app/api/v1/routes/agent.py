@@ -33,6 +33,7 @@ from app.core import report_channels  # P2#18：报告流式增量通道（SSE r
 from app.models.user import User
 from app.agents.orchestrator_agent import OrchestratorAgent
 from app.schemas.agent import AgentTaskRequest, TaskResumeRequest
+from app.schemas.report import ReportGenerateRequest
 from app.models.task import AgentTask, AgentTaskStep
 from app.models.report import AnalysisReport
 from app.repositories.report_repository import ReportRepository
@@ -235,34 +236,22 @@ def _save_task_report(db: Session, task: AgentTask, query: str, report_data: str
     repo = ReportRepository(db)
     body = report_data if isinstance(report_data, str) else str(report_data)
     audit = audit or {}
-    report_tags = ["Agent生成", "LLM" if llm_used else "模板"]
-    report_type = _classify_report_type(query)
-    report_summary = f"任务：{query[:80]}"
-    # 同一任务重跑：优先按 task.report_id 覆盖旧报告，报告中心只保留最后一次成功的结果
-    # （query 措辞变化会导致标题不同，仅按标题去重会漏 → 产生多条中间记录）
-    if task.report_id and repo.overwrite(
-        task.report_id,
-        content=body,
-        summary=report_summary,
-        report_type=report_type,
-        tags=report_tags,
-        llm_provider=audit.get("llm_provider"),
-        llm_model=audit.get("llm_model"),
-        llm_tokens=audit.get("llm_tokens"),
-        llm_degraded=bool(audit.get("llm_degraded")),
-    ):
-        return
-    report = repo.upsert_from_task(
-        title=f"{title}{days_str}",
-        content=body,
-        summary=report_summary,
-        report_type=report_type,
-        tags=report_tags,
+    # 每次任务执行成功都新建一条报告记录（不做同标题/同任务覆盖合并）：
+    # 用户要求新生成的报告在报告中心是独立新条目，重复问题重跑也各成一条，
+    # 不需要的旧报告由用户在报告中心自行删除
+    report = repo.create(
+        ReportGenerateRequest(
+            title=f"{title}{days_str}",
+            report_type=_classify_report_type(query),
+            summary=f"任务：{query[:80]}",
+            content=body,
+            tags=["Agent生成", "LLM" if llm_used else "模板"],
+            llm_provider=audit.get("llm_provider"),
+            llm_model=audit.get("llm_model"),
+            llm_tokens=audit.get("llm_tokens"),
+            llm_degraded=bool(audit.get("llm_degraded")),
+        ),
         user_id=task.user_id,
-        llm_provider=audit.get("llm_provider"),
-        llm_model=audit.get("llm_model"),
-        llm_tokens=audit.get("llm_tokens"),
-        llm_degraded=bool(audit.get("llm_degraded")),
     )
     if report:
         task.report_id = report.id
