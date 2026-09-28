@@ -31,6 +31,10 @@ async def lifespan(app: FastAPI):
         for table, col, coltype in (
             ("kb_documents", "user_id", "INTEGER"),
             ("analysis_reports", "user_id", "INTEGER"),
+            ("analysis_reports", "llm_provider", "VARCHAR(50)"),
+            ("analysis_reports", "llm_model", "VARCHAR(120)"),
+            ("analysis_reports", "llm_tokens", "JSON"),
+            ("analysis_reports", "llm_degraded", "BOOLEAN DEFAULT FALSE"),
             ("agent_tasks", "user_id", "INTEGER"),
             ("query_history", "result", "JSON"),
             ("rag_history", "result", "JSON"),
@@ -59,6 +63,38 @@ async def lifespan(app: FastAPI):
             ))
             db.commit()
             print("[INIT] 已创建默认管理员账号: admin / 123456")
+    finally:
+        db.close()
+
+    # 启动自愈：worker 随进程消亡，running 任务不可能再推进 → 标记中断；
+    # awaiting_approval 不动（HITL 中断态存于 PostgresSaver，重启后仍可审批恢复）
+    from datetime import datetime
+    from app.models.task import AgentTask, AgentTaskStep
+    db = SessionLocal()
+    try:
+        stuck = db.query(AgentTask).filter(AgentTask.status == "running").all()
+        for t in stuck:
+            t.status = "failed"
+            t.final_summary = "服务重启导致任务中断，请重新发起任务"
+            t.finished_at = datetime.now()
+        if stuck:
+            db.commit()
+            print(f"[INIT] 已将 {len(stuck)} 个中断的 running 任务标记为 failed")
+
+        # 清理僵尸 running 步骤行：① 同 (task_id, step_name) 已被终态行取代的历史重复行
+        # ② 归属于已中断任务、永远不会再推进的 running 行
+        running_rows = db.query(AgentTaskStep).filter(AgentTaskStep.status == "running").all()
+        terminal_keys = {(r.task_id, r.step_name) for r in db.query(AgentTaskStep).all()
+                         if (r.status or "") != "running"}
+        dead_ids = {t.id for t in stuck}
+        removed = 0
+        for r in running_rows:
+            if (r.task_id, r.step_name) in terminal_keys or r.task_id in dead_ids:
+                db.delete(r)
+                removed += 1
+        if removed:
+            db.commit()
+            print(f"[INIT] 已清理 {removed} 条僵尸 running 步骤行")
     finally:
         db.close()
 

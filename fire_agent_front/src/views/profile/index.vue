@@ -108,6 +108,7 @@ const changePassword = async () => {
     <header class="profile-header">
       <h1 class="profile-title">个人中心</h1>
       <p class="profile-subtitle">管理个人资料与账号安全</p>
+      <p class="datav-en">Personal Center · Account Security</p>
     </header>
 
     <div class="profile-grid">
@@ -186,13 +187,13 @@ const changePassword = async () => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0a0f1e;
-  color: #f8fafc;
+  background: var(--gis-atmo-bg);
+  color: var(--gis-text, #f8fafc);
   overflow-y: auto;
 }
 .profile-header {
   padding: 18px 24px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
   flex-shrink: 0;
 }
 .profile-title {
@@ -203,7 +204,7 @@ const changePassword = async () => {
 .profile-subtitle {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .profile-grid {
   display: grid;
@@ -213,10 +214,13 @@ const changePassword = async () => {
   max-width: 960px;
 }
 .profile-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 8px;
+  background: var(--gis-glass-2);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
   padding: 18px 20px;
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
 }
 .pc-title {
   display: flex;
@@ -224,10 +228,10 @@ const changePassword = async () => {
   gap: 8px;
   font-size: 14px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   margin-bottom: 16px;
   padding-bottom: 10px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
 }
 .info-rows {
   margin-bottom: 16px;
@@ -236,7 +240,7 @@ const changePassword = async () => {
   display: flex;
   align-items: center;
   padding: 8px 0;
-  border-bottom: 1px dashed #1e293b;
+  border-bottom: 1px dashed var(--gis-border, #1e293b);
 }
 .info-row:last-child {
   border-bottom: none;
@@ -244,12 +248,12 @@ const changePassword = async () => {
 .ir-label {
   width: 80px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   flex-shrink: 0;
 }
 .ir-value {
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -265,7 +269,7 @@ const changePassword = async () => {
   border: 1px solid rgba(250, 204, 21, 0.3);
 }
 .role-user {
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
@@ -275,24 +279,24 @@ const changePassword = async () => {
 .form-item label {
   display: block;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   margin-bottom: 6px;
 }
 .card-actions {
   margin-top: 16px;
 }
 .card-actions :deep(.el-button--primary) {
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  background: var(--gis-accent);
+  border-color: var(--gis-accent);
 }
 .pwd-note {
   margin-top: 4px;
   padding: 8px 12px;
   font-size: 11px;
   line-height: 1.7;
-  color: #94a3b8;
-  background: rgba(14, 165, 233, 0.05);
-  border: 1px dashed rgba(14, 165, 233, 0.25);
+  color: var(--gis-text-muted, #94a3b8);
+  background: rgba(34, 211, 238, 0.05);
+  border: 1px dashed rgba(34, 211, 238, 0.25);
   border-radius: 4px;
 }
 </style>

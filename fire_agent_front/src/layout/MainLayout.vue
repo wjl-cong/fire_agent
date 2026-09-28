@@ -6,14 +6,20 @@
 import { computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
+import { useThemeStore } from '@/stores/theme'
 
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+const theme = useThemeStore()
 
 const handleLogout = () => {
   auth.logout()
   router.replace('/login')
+}
+
+const handleToggleTheme = () => {
+  theme.toggle()
 }
 
 // iconfont 实际可用图标（已从阿里 CDN 核实）：
@@ -53,8 +59,15 @@ const navItems = computed(() =>
         </router-link>
       </nav>
 
-      <!-- 用户信息 / 退出 -->
+      <!-- 主题切换 / 用户信息 / 退出 -->
       <div class="sidebar-user">
+        <button
+          class="theme-btn"
+          :title="theme.mode === 'dark' ? '切换到浅色主题' : '切换到深色主题'"
+          @click="handleToggleTheme"
+        >
+          {{ theme.mode === 'dark' ? '☀' : '☾' }}
+        </button>
         <router-link to="/profile" class="user-avatar" title="个人中心">
           {{ auth.displayName ? auth.displayName.charAt(0).toUpperCase() : 'U' }}
         </router-link>
@@ -77,7 +90,7 @@ const navItems = computed(() =>
   width: 100%;
   height: 100vh;
   height: 100dvh;
-  background: var(--gis-bg-deep, #020617);
+  background: var(--gis-atmo-bg);
   color: var(--gis-text, #f8fafc);
   overflow: hidden;
 }
@@ -89,8 +102,10 @@ const navItems = computed(() =>
   display: flex;
   flex-direction: column;
   align-items: center;
-  background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
-  border-right: 1px solid var(--gis-border, #334155);
+  background: linear-gradient(180deg, var(--gis-glass-solid) 0%, var(--gis-bg-deep) 100%);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border-right: 1px solid var(--gis-glass-border);
+  box-shadow: 1px 0 0 var(--gis-glass-border);
   z-index: 30;
   overflow: hidden;
 }
@@ -110,7 +125,7 @@ const navItems = computed(() =>
   font-weight: 800;
   color: var(--gis-accent, #0ea5e9);
   letter-spacing: 0.04em;
-  text-shadow: 0 0 8px rgba(14, 165, 233, 0.4);
+  text-shadow: var(--gis-text-glow, 0 0 8px rgba(34, 211, 238, 0.4));
 }
 
 .sidebar-nav {
@@ -139,12 +154,24 @@ const navItems = computed(() =>
 
 .nav-item:hover {
   color: var(--gis-text, #f8fafc);
-  background: rgba(34, 211, 238, 0.08);
+  background: var(--gis-hover-tint);
 }
 
 .nav-item.active {
   color: var(--gis-accent, #0ea5e9);
-  background: rgba(34, 211, 238, 0.12);
+  background: var(--gis-accent-soft);
+  box-shadow: var(--gis-glow-strong);
+}
+
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: -4px;
+  top: 8px;
+  bottom: 8px;
+  width: 2px;
+  background: var(--gis-metal-accent);
+  box-shadow: 0 0 6px var(--gis-accent-dim);
 }
 
 .nav-item .iconfont {
@@ -187,16 +214,36 @@ const navItems = computed(() =>
   justify-content: center;
   font-size: 13px;
   font-weight: 700;
-  color: #020617;
-  background: #0ea5e9;
+  color: var(--gis-on-accent);
+  background: var(--gis-metal-accent);
   border-radius: 50%;
   cursor: pointer;
   text-decoration: none;
   transition: box-shadow 0.15s, transform 0.15s;
 }
 .user-avatar:hover {
-  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.4);
+  box-shadow: 0 0 0 2px var(--gis-accent-dim), var(--gis-glow);
   transform: scale(1.08);
+}
+.theme-btn {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  line-height: 1;
+  color: var(--gis-text-muted, #94a3b8);
+  background: transparent;
+  border: 1px solid var(--gis-border, #334155);
+  border-radius: 50%;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+.theme-btn:hover {
+  color: var(--gis-accent, #0ea5e9);
+  border-color: var(--gis-accent-dim);
+  box-shadow: var(--gis-glow);
 }
 .logout-btn {
   width: 28px;

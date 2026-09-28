@@ -1,0 +1,16 @@
+# 后端构建上下文排除项
+.git
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.env
+.env.*
+!.env.example
+data/
+scripts/tmp_*.py
+*.log
+.vscode
+.idea
+migrations/versions/*.pyc

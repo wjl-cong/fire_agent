@@ -13,6 +13,11 @@ class ReportGenerateRequest(BaseModel):
     content: str = ""
     tags: Optional[list[str]] = None
     overwrite: bool = False
+    # LLM 审计元数据（Agent 生成时由 worker 注入；手动生成留空）
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_tokens: Optional[dict] = None
+    llm_degraded: bool = False
 
 
 class ReportOut(BaseModel):
@@ -25,6 +30,11 @@ class ReportOut(BaseModel):
     tags: Optional[list] = None
     status: Optional[str] = None
     created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_tokens: Optional[dict] = None
+    llm_degraded: bool = False
 
 
 class ReportBriefOut(BaseModel):
@@ -36,3 +46,6 @@ class ReportBriefOut(BaseModel):
     tags: Optional[list] = None
     status: Optional[str] = None
     created_at: Optional[str] = None
+    llm_provider: Optional[str] = None
+    llm_model: Optional[str] = None
+    llm_degraded: bool = False

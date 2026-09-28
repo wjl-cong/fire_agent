@@ -5,8 +5,12 @@
 """
 import re
 from datetime import datetime
+from typing import Literal
 
-from app.core.llm import get_llm, llm_available
+from pydantic import BaseModel
+
+from app.core.llm import llm_available
+from app.core.llm_invoker import invoke_structured
 from app.repositories.fire_repository import FireRepository
 from app.schemas.query import QueryParseResult, QueryResult
 
@@ -55,6 +59,51 @@ CONFIDENCE_MAP = {"高": "high", "低": "low", "中": "nominal", "high": "high",
 CN_MONTH = {"一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10, "十一": 11, "十二": 12}
 
 
+class _QueryParseLLM(BaseModel):
+    """LLM 意图解析结构化输出 Schema（with_structured_output 使用）"""
+    intent: Literal["history", "predict", "summary"] = "history"
+    city: str | None = None
+    year: int | None = None
+    month: int | None = None
+    months: list[int] | None = None
+    confidence: str | None = None
+    top_k: int | None = None
+    sort: str | None = None
+    explanation: str = ""
+
+
+def _clean_llm_data(data: dict) -> dict:
+    """清洗 LLM 返回值：年份/月份/top_k 统一转数字，去掉"年/月"后缀，避免脏值导致查询为空"""
+    for k in ("year", "month", "top_k"):
+        if k in data and data[k] is not None:
+            try:
+                data[k] = int(str(data[k]).replace("年", "").replace("月", "").strip())
+            except (ValueError, TypeError):
+                data[k] = None
+    if isinstance(data.get("months"), list):
+        cleaned_months = []
+        for m in data["months"]:
+            try:
+                cleaned_months.append(int(str(m).replace("月", "").strip()))
+            except (ValueError, TypeError):
+                continue
+        data["months"] = cleaned_months or None
+    return data
+
+
+def _parse_query_text(text: str) -> _QueryParseLLM | None:
+    """结构化输出失败时的文本解析兜底（兼容旧版 ```json 清洗逻辑）"""
+    import json
+    try:
+        text = text.strip().removeprefix("```json").removesuffix("```").strip()
+        data = json.loads(text)
+        if not isinstance(data, dict):
+            return None
+        return _QueryParseLLM(**_clean_llm_data(data))
+    except Exception:
+        return None
+
+
 class QueryService:
     def __init__(self, db_session):
         self.repo = FireRepository(db_session)
@@ -83,8 +132,7 @@ class QueryService:
     # ========== LLM 解析 ==========
 
     def _parse_with_llm(self, query_text: str) -> QueryParseResult:
-        """使用 LLM 解析自然语言"""
-        llm = get_llm(temperature=0.05)
+        """使用 LLM 解析自然语言（结构化输出优先，失败降级文本解析/关键词解析）"""
         prompt = f"""你是一个火险数据查询助手。请解析用户的自然语言查询，输出 JSON 格式结果。
 
 可用查询类型：history（历史火点）、predict（预测火险）、summary（数据汇总）
@@ -98,26 +146,11 @@ class QueryService:
 {{"intent": "history|predict|summary", "city": "城市名或null", "year": 年份或null, "month": 月份或null, "months": [月份列表]或null, "confidence": "置信度或null", "top_k": 数量或null, "sort": "desc或null", "explanation": "解析说明"}}
 仅输出 JSON，不要其他文字。"""
         try:
-            response = llm.invoke(prompt)
-            import json
-            text = response.content if hasattr(response, "content") else str(response)
-            text = text.strip().removeprefix("```json").removesuffix("```").strip()
-            data = json.loads(text)
-            # 清洗 LLM 返回值：年份/月份/top_k 统一转数字，去掉"年/月"后缀，避免脏值导致查询为空
-            for k in ("year", "month", "top_k"):
-                if k in data and data[k] is not None:
-                    try:
-                        data[k] = int(str(data[k]).replace("年", "").replace("月", "").strip())
-                    except (ValueError, TypeError):
-                        data[k] = None
-            if isinstance(data.get("months"), list):
-                cleaned_months = []
-                for m in data["months"]:
-                    try:
-                        cleaned_months.append(int(str(m).replace("月", "").strip()))
-                    except (ValueError, TypeError):
-                        continue
-                data["months"] = cleaned_months or None
+            obj, _meta = invoke_structured(prompt, _QueryParseLLM, temperature=0.05,
+                                           fallback=_parse_query_text)
+            if obj is None:
+                return self._parse_with_keyword(query_text)
+            data = _clean_llm_data(obj.model_dump())
             return QueryParseResult(
                 intent=data.get("intent", "history"),
                 params={k: v for k, v in data.items() if k not in ("intent", "explanation") and v is not None},

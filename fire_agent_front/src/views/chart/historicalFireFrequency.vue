@@ -8,7 +8,8 @@ import { FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { onMounted, ref, nextTick, onUnmounted, computed, watch } from 'vue'
 import * as echarts from 'echarts'
 import { parseGeoData } from '@/utils/parseGeoData'
-import { gisChartPalette } from '@/utils/echartsGisTheme'
+import { chartTokens } from '@/utils/themeTokens'
+import { useThemeStore } from '@/stores/theme'
 
 // 接收 fireData prop（由父组件传入 API 数据或本地数据）
 const props = defineProps({
@@ -17,6 +18,10 @@ const props = defineProps({
     default: null
   }
 })
+
+// 主题 Token：传入 mode 仅为建立响应式依赖，主题切换时重新读取 CSS 变量
+const theme = useThemeStore()
+const tokens = computed(() => chartTokens(theme.mode))
 
 // 当 fireData 变化时重新解析
 const rawGeo = ref(props.fireData ? parseGeoData(props.fireData) : parseGeoData())
@@ -64,15 +69,17 @@ const handleSizeChange = (val) => {
   currentPage.value = 1
 }
 
-// 柱状图配置（computed：数据变化时自动更新）
-const option = computed(() => ({
+// 柱状图配置（computed：数据/主题变化时自动更新）
+const option = computed(() => {
+  const t = tokens.value
+  return {
   backgroundColor: 'transparent',
   tooltip: {
     trigger: 'axis',
-    backgroundColor: gisChartPalette.bgTooltip,
-    borderColor: gisChartPalette.axis,
+    backgroundColor: t.panel,
+    borderColor: t.border,
     borderWidth: 1,
-    textStyle: { color: gisChartPalette.textStrong, fontSize: 12 },
+    textStyle: { color: t.text, fontSize: 12 },
     axisPointer: { type: 'shadow' }
   },
   grid: {
@@ -84,13 +91,13 @@ const option = computed(() => ({
   xAxis: {
     type: 'category',
     data: top7Days.value.map(i => i.name),
-    axisLabel: { color: gisChartPalette.text, fontSize: 10, rotate: 28 },
-    axisLine: { lineStyle: { color: gisChartPalette.axis } }
+    axisLabel: { color: t.muted, fontSize: 10, rotate: 28 },
+    axisLine: { lineStyle: { color: t.border } }
   },
   yAxis: {
     type: 'value',
-    axisLabel: { color: gisChartPalette.text },
-    splitLine: { lineStyle: { type: 'dashed', color: gisChartPalette.split } }
+    axisLabel: { color: t.muted },
+    splitLine: { lineStyle: { type: 'dashed', color: t.split } }
   },
   series: [{
     name: '火点频次',
@@ -103,10 +110,11 @@ const option = computed(() => ({
     label: {
       show: true,
       position: 'top',
-      color: gisChartPalette.textStrong
+      color: t.text
     }
   }]
-}))
+  }
+})
 
 const initChart = () => {
   if (chartRef.value) {
@@ -146,6 +154,16 @@ onMounted(() => {
 
 // fireData 变化时刷新图表
 watch(() => props.fireData, () => {
+  nextTick(() => {
+    initChart()
+    if (isMaximized.value) {
+      nextTick(() => initMaxChart())
+    }
+  })
+})
+
+// 主题切换时重建图表（option 依赖主题 token，重新 setOption 即可）
+watch(() => theme.mode, () => {
   nextTick(() => {
     initChart()
     if (isMaximized.value) {
@@ -199,7 +217,7 @@ onUnmounted(() => {
                 stripe
                 border
                 style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"
-                :header-cell-style="{ background: '#f8fafc', color: '#606266', fontWeight: 'bold' }"
+                :header-cell-style="{ background: 'var(--gis-table-header)', color: 'var(--gis-text-muted)', fontWeight: 'bold' }"
               >
                 <el-table-column prop="acq_date" label="日期" min-width="120" sortable />
                 <el-table-column prop="acq_time" label="时间" min-width="100" />
@@ -245,11 +263,11 @@ onUnmounted(() => {
     top: 0;
     right: 0;
     cursor: pointer;
-    color: #94a3b8;
+    color: var(--gis-text-muted, #94a3b8);
     z-index: 10;
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 4px;
+    background: var(--gis-glass-solid);
+    border: 1px solid var(--gis-border);
+    border-radius: var(--gis-radius-xs, 4px);
     width: 24px;
     height: 24px;
     display: flex;
@@ -257,7 +275,8 @@ onUnmounted(() => {
     justify-content: center;
 
     &:hover {
-      background: #1e293b;
+      background: var(--gis-accent-soft);
+      box-shadow: var(--gis-glow);
     }
   }
 
@@ -274,7 +293,7 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   z-index: 2000;
-  background: #020617;
+  background: var(--gis-atmo-bg);
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -289,9 +308,10 @@ onUnmounted(() => {
 
     .max-title {
       font-size: 22px;
-      color: #f8fafc;
+      color: var(--gis-text, #f8fafc);
       font-weight: 600;
       letter-spacing: 0.04em;
+      text-shadow: var(--gis-text-glow);
     }
   }
 
@@ -304,9 +324,9 @@ onUnmounted(() => {
     .chart-area-max {
       width: 40%;
       height: 100%;
-      background: #0f172a;
+      background: var(--gis-bg-panel);
       border-radius: 2px;
-      border: 1px solid #334155;
+      border: 1px solid var(--gis-border);
     }
 
     .table-area {

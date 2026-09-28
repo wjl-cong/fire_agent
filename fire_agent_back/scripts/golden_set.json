@@ -1,0 +1,100 @@
+{
+    "meta": {
+        "desc": "评估回归 golden set（P2#13）：沉淀典型查询与期望要点。改动 prompt / 换模型 / 改图结构前必跑 scripts/eval_regression.py，全绿才允许合入",
+        "allowed_plan_types": ["query_data", "analyze_gis", "retrieve_knowledge", "generate_report"],
+        "trajectory_note": "trajectory 仅对计划含 generate_report 的用例做 fallback 图精确校验（fallback 解析固定产出 query_data+generate_report 计划，节点序列确定）；其余用例只校验路由逻辑（fan-out / join→end）",
+        "version": "2026-09-27"
+    },
+    "cases": [{
+            "id": "case-001-mixed-report",
+            "query": "分析2025年4月云南火险形势，结合历史火点给出高风险区域和重点巡防建议，并生成报告",
+            "plan_types": ["query_data", "generate_report"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join", "generate_report", "review_report", "approval_gate"],
+            "report_elements": ["执行摘要", "数据来源", "巡防", "高风险"],
+            "min_report_length": 500
+        },
+        {
+            "id": "case-002-history-lookup",
+            "query": "查询2023年3月大理历史火点分布情况",
+            "plan_types": ["query_data"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join"],
+            "report_elements": [],
+            "min_report_length": 0
+        },
+        {
+            "id": "case-003-predict-lookup",
+            "query": "预测2026年2月昆明市的火险等级如何",
+            "plan_types": ["query_data"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join"],
+            "report_elements": [],
+            "min_report_length": 0
+        },
+        {
+            "id": "case-004-kb-regulation",
+            "query": "森林防火条例对野外用火有什么规定",
+            "plan_types": ["retrieve_knowledge"],
+            "expected_fanout": ["retrieve_knowledge"],
+            "trajectory": ["parse_task", "retrieve_knowledge", "join"],
+            "report_elements": [],
+            "min_report_length": 0
+        },
+        {
+            "id": "case-005-stats-compare",
+            "query": "统计2024年全年云南省各州市火点数量并对比分析",
+            "plan_types": ["query_data"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join"],
+            "report_elements": [],
+            "min_report_length": 0
+        },
+        {
+            "id": "case-006-city-patrol-report",
+            "query": "针对丽江市2025年春季防火期，生成一份重点区域巡防方案报告",
+            "plan_types": ["query_data", "generate_report"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join", "generate_report", "review_report", "approval_gate"],
+            "report_elements": ["执行摘要", "数据来源", "巡防"],
+            "min_report_length": 500
+        },
+        {
+            "id": "case-007-kb-and-report",
+            "query": "结合防火规范，分析2026年1月曲靖市火险风险并输出带规范依据的报告",
+            "plan_types": ["retrieve_knowledge", "generate_report"],
+            "expected_fanout": ["retrieve_knowledge"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join", "generate_report", "review_report", "approval_gate"],
+            "report_elements": ["执行摘要", "数据来源", "巡防"],
+            "min_report_length": 500
+        },
+        {
+            "id": "case-008-trend-report",
+            "query": "对比2024年与2025年昭通市火点变化趋势并输出分析报告",
+            "plan_types": ["query_data", "generate_report"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join", "generate_report", "review_report", "approval_gate"],
+            "report_elements": ["执行摘要", "数据来源", "巡防"],
+            "min_report_length": 500
+        },
+        {
+            "id": "case-009-kb-standard",
+            "query": "查一下知识库里关于火险等级划分的标准",
+            "plan_types": ["retrieve_knowledge"],
+            "expected_fanout": ["retrieve_knowledge"],
+            "trajectory": ["parse_task", "retrieve_knowledge", "join"],
+            "report_elements": [],
+            "min_report_length": 0
+        },
+        {
+            "id": "case-010-illegal-type-filtered",
+            "query": "分析2025年11月玉溪市火险并生成报告",
+            "plan_types": ["query_data", "generate_report", "delete_database"],
+            "expected_fanout": ["query_data"],
+            "trajectory": ["parse_task", "query_data", "analyze_gis", "join", "generate_report", "review_report", "approval_gate"],
+            "report_elements": ["执行摘要", "数据来源", "巡防"],
+            "min_report_length": 500,
+            "note": "非法类型 delete_database 必须被 route_after_parse 过滤（Tool Correctness：agent 永远拿不到危险工具）"
+        }
+    ]
+}

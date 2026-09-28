@@ -4,11 +4,13 @@
  *
  * 调用后端 API: POST /api/v1/query/execute
  */
-import { ref, reactive, computed, nextTick, onMounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, watch } from 'vue'
 import * as echarts from 'echarts'
 import { ElMessage } from 'element-plus'
 import authFetch from '@/utils/authFetch'
 import { API_V1 } from '@/utils/config'
+import { chartTokens } from '@/utils/themeTokens'
+import { useThemeStore } from '@/stores/theme'
 
 // OpenLayers 地图
 import Map from 'ol/Map.js'
@@ -329,6 +331,8 @@ const renderMap = () => {
 }
 
 // ====== 图表渲染 ======
+const theme = useThemeStore()
+
 const renderChart = () => {
   if (!chartRef.value) return
   if (chartInstance) chartInstance.dispose()
@@ -339,23 +343,24 @@ const renderChart = () => {
 
   const labels = currentResult.chartData.labels
   const values = currentResult.chartData.values
+  const t = chartTokens() // 主题取色：文字/坐标轴/浮层跟随浅色/深色主题
 
   let option = {}
 
   if (currentResult.chartType === 'pie') {
     option = {
-      tooltip: { trigger: 'item', backgroundColor: 'rgba(15,23,42,0.95)', borderColor: '#334155' },
-      legend: { textStyle: { color: '#94a3b8' }, bottom: 0 },
+      tooltip: { trigger: 'item', backgroundColor: t.panel, borderColor: t.border, textStyle: { color: t.text } },
+      legend: { textStyle: { color: t.muted }, bottom: 0 },
       series: [{
         type: 'pie',
         radius: ['35%', '60%'],
         center: ['50%', '45%'],
         itemStyle: {
           borderRadius: 4,
-          borderColor: '#020617',
+          borderColor: t.panel,
           borderWidth: 2,
         },
-        label: { color: '#f8fafc', fontSize: 11 },
+        label: { color: t.text, fontSize: 11 },
         data: labels.map((name, i) => ({
           name,
           value: values[i] || 0,
@@ -367,22 +372,22 @@ const renderChart = () => {
     option = {
       tooltip: {
         trigger: 'axis',
-        backgroundColor: 'rgba(15,23,42,0.95)',
-        borderColor: '#334155',
-        textStyle: { color: '#f8fafc' },
+        backgroundColor: t.panel,
+        borderColor: t.border,
+        textStyle: { color: t.text },
       },
       grid: { left: 50, right: 20, top: 20, bottom: 40 },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { color: '#94a3b8', fontSize: 10, rotate: labels.length > 8 ? 45 : 0 },
-        axisLine: { lineStyle: { color: '#334155' } },
+        axisLabel: { color: t.axis, fontSize: 10, rotate: labels.length > 8 ? 45 : 0 },
+        axisLine: { lineStyle: { color: t.border } },
         splitLine: { show: false },
       },
       yAxis: {
         type: 'value',
-        axisLabel: { color: '#94a3b8', fontSize: 10 },
-        splitLine: { lineStyle: { color: '#1e293b' } },
+        axisLabel: { color: t.axis, fontSize: 10 },
+        splitLine: { lineStyle: { color: t.split } },
       },
       series: [{
         type: currentResult.chartType === 'bar' ? 'bar' : 'line',
@@ -409,6 +414,13 @@ const renderChart = () => {
   chartInstance.setOption(option)
   chartInstance.resize()
 }
+
+// 主题切换时重建图表（重取 CSS 变量配色）
+watch(() => theme.mode, () => {
+  if (currentResult.chartData && currentResult.chartData.labels?.length) {
+    nextTick(() => renderChart())
+  }
+})
 
 // ====== 键盘快捷键 ======
 const handleKeydown = (e) => {
@@ -451,10 +463,13 @@ onUnmounted(() => {
 
 <template>
   <div class="query-shell">
-    <!-- 页面标题 -->
+    <!-- 页头卡（sc-datav TitleWrapper 同构：强调竖条 + 标题 + 英文角标） -->
     <header class="query-header">
-      <h1 class="query-title">智能查询</h1>
-      <p class="query-subtitle">QueryAgent 解析自然语言 → DataAgent 执行查询 → 四维展示结果</p>
+      <div class="query-header-left">
+        <h1 class="query-title">智能查询</h1>
+        <p class="query-subtitle">QueryAgent 解析自然语言 → DataAgent 执行查询 → 四维展示结果</p>
+        <p class="datav-en">Smart Query · NL2Data</p>
+      </div>
     </header>
 
     <div class="query-body">
@@ -462,6 +477,7 @@ onUnmounted(() => {
       <aside class="query-history" :class="{ expanded: showHistory }">
         <div class="history-header" @click="showHistory = !showHistory">
           <span class="history-label">查询历史</span>
+          <span class="history-en">History</span>
           <span class="history-count">{{ queryHistory.length }}</span>
         </div>
         <div v-if="showHistory" class="history-list">
@@ -682,14 +698,39 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   padding: 20px 24px;
-  background: var(--gis-bg-deep, #020617);
+  background: var(--gis-atmo-bg);
   color: var(--gis-text, #f8fafc);
   overflow: hidden;
 }
 
+/* 页头卡（sc-datav TitleWrapper 同构：玻璃底 + 强调竖条 + 英文角标） */
 .query-header {
   flex-shrink: 0;
   margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 20px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
+}
+
+.query-header::before {
+  content: '';
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  background: var(--gis-accent, #0ea5e9);
+  flex-shrink: 0;
+}
+
+.query-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .query-title {
@@ -717,9 +758,11 @@ onUnmounted(() => {
 .query-history {
   flex-shrink: 0;
   width: 48px;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   transition: width 0.2s ease;
   overflow: hidden;
   display: flex;
@@ -742,6 +785,30 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 
+.history-header::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--gis-accent, #0ea5e9);
+  flex-shrink: 0;
+}
+
+/* 英文角标：展开后才显示（与知识库 docs-en 同构） */
+.history-en {
+  display: none;
+  margin-left: auto;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 8px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--gis-text-muted, #94a3b8);
+}
+
+.expanded .history-en {
+  display: inline;
+}
+
 .history-label {
   display: none;
   font-size: 12px;
@@ -758,7 +825,7 @@ onUnmounted(() => {
   font-size: 10px;
   padding: 1px 6px;
   background: var(--gis-accent, #0ea5e9);
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   border-radius: 8px;
   font-weight: 700;
 }
@@ -784,7 +851,7 @@ onUnmounted(() => {
 }
 
 .history-item:hover {
-  background: rgba(34, 211, 238, 0.08);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.08));
 }
 
 .history-delete {
@@ -798,7 +865,7 @@ onUnmounted(() => {
   text-align: center;
   font-size: 12px;
   color: var(--gis-text-muted, #64748b);
-  background: rgba(2, 6, 23, 0.7);
+  background: var(--gis-mask, rgba(2, 6, 23, 0.7));
   border: 1px solid var(--gis-border, #334155);
   border-radius: 2px;
   cursor: pointer;
@@ -883,9 +950,11 @@ onUnmounted(() => {
 /* 输入区 */
 .input-area {
   flex-shrink: 0;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   padding: 14px 16px;
 }
 
@@ -911,22 +980,24 @@ onUnmounted(() => {
 
 .query-input :deep(.el-textarea__inner:focus) {
   border-color: var(--gis-accent, #0ea5e9) !important;
-  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15) !important;
+  box-shadow: 0 0 0 2px var(--gis-accent-soft, rgba(34, 211, 238, 0.15)) !important;
 }
 
 .query-btn {
   flex-shrink: 0;
   height: 74px;
   min-width: 80px;
-  background: var(--gis-accent, #0ea5e9) !important;
-  border-color: var(--gis-accent, #0ea5e9) !important;
-  color: #020617 !important;
+  background: var(--gis-metal-accent) !important;
+  border: none !important;
+  color: var(--gis-on-accent, #020617) !important;
   font-weight: 600;
   letter-spacing: 0.04em;
+  transition: filter 0.15s, box-shadow 0.15s;
 }
 
 .query-btn:hover {
-  background: #38bdf8 !important;
+  filter: brightness(1.1) !important;
+  box-shadow: var(--gis-glow-strong) !important;
 }
 
 /* 语音输入按钮 */
@@ -969,8 +1040,8 @@ onUnmounted(() => {
   font-size: 11px;
   padding: 2px 8px;
   color: var(--gis-accent, #0ea5e9);
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.1));
+  border: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.2));
   border-radius: 12px;
   cursor: pointer;
   transition: background 0.15s;
@@ -978,7 +1049,7 @@ onUnmounted(() => {
 }
 
 .example-tag:hover {
-  background: rgba(14, 165, 233, 0.2);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.2));
 }
 
 .keyboard-hint {
@@ -991,10 +1062,12 @@ onUnmounted(() => {
 /* QueryAgent 解析过程 */
 .agent-parse {
   flex-shrink: 0;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid rgba(14, 165, 233, 0.25);
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
   border-left: 3px solid var(--gis-accent, #0ea5e9);
-  border-radius: 3px;
+  border-radius: var(--gis-radius-md, 10px);
   overflow: hidden;
 }
 
@@ -1003,15 +1076,15 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: rgba(14, 165, 233, 0.08);
-  border-bottom: 1px solid rgba(14, 165, 233, 0.15);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.08));
+  border-bottom: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.15));
 }
 
 .ap-agent-badge {
   padding: 2px 8px;
   font-size: 10px;
   font-weight: 700;
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   background: var(--gis-accent, #0ea5e9);
   border-radius: 10px;
   font-family: ui-monospace, "Consolas", monospace;
@@ -1085,8 +1158,8 @@ onUnmounted(() => {
   padding: 1px 8px;
   font-size: 10px;
   color: var(--gis-text, #f8fafc);
-  background: rgba(34, 211, 238, 0.08);
-  border: 1px solid rgba(34, 211, 238, 0.2);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.08));
+  border: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.2));
   border-radius: 10px;
   white-space: nowrap;
   font-family: ui-monospace, "Consolas", monospace;
@@ -1113,10 +1186,12 @@ onUnmounted(() => {
   align-items: flex-start;
   gap: 12px;
   padding: 12px 14px;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
   border-left: 3px solid var(--gis-accent, #0ea5e9);
-  border-radius: 3px;
+  border-radius: var(--gis-radius-md, 10px);
   flex-shrink: 0;
 }
 
@@ -1130,7 +1205,7 @@ onUnmounted(() => {
   font-size: 11px;
   font-weight: 700;
   font-family: ui-monospace, "Consolas", monospace;
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   background: var(--gis-accent, #0ea5e9);
   border-radius: 50%;
 }
@@ -1157,9 +1232,11 @@ onUnmounted(() => {
   display: flex;
   gap: 2px;
   flex-shrink: 0;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 3px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   padding: 2px;
 }
 
@@ -1178,11 +1255,11 @@ onUnmounted(() => {
 
 .tab-btn:hover:not(:disabled) {
   color: var(--gis-text, #f8fafc);
-  background: rgba(34, 211, 238, 0.08);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.08));
 }
 
 .tab-btn.active {
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   background: var(--gis-accent, #0ea5e9);
   font-weight: 600;
 }
@@ -1220,9 +1297,11 @@ onUnmounted(() => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 3px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   padding: 12px;
   overflow: hidden;
 }
@@ -1274,32 +1353,32 @@ onUnmounted(() => {
   justify-content: center;
   font-size: 12px;
   color: var(--gis-text-muted, #94a3b8);
-  background: rgba(2, 6, 23, 0.4);
+  background: var(--gis-accent-soft, rgba(2, 6, 23, 0.4));
   border: 1px dashed var(--gis-border, #334155);
   border-radius: 3px;
 }
 .map-container :deep(.ol-attribution) {
-  background: rgba(2, 6, 23, 0.6);
+  background: var(--gis-mask, rgba(2, 6, 23, 0.6));
   font-size: 10px;
 }
 .map-container :deep(.ol-control button) {
-  background: rgba(2, 6, 23, 0.6);
+  background: var(--gis-mask, rgba(2, 6, 23, 0.6));
 }
 .map-container :deep(.ol-control button:hover) {
-  background: rgba(14, 165, 233, 0.8);
+  background: var(--gis-accent, #0ea5e9);
 }
 
 /* 表格 */
 .result-table :deep(.el-table) {
   --el-table-bg-color: transparent !important;
   --el-table-tr-bg-color: transparent !important;
-  --el-table-header-bg-color: #020617 !important;
-  --el-table-row-hover-bg-color: rgba(34, 211, 238, 0.08) !important;
+  --el-table-header-bg-color: var(--gis-table-header, #020617) !important;
+  --el-table-row-hover-bg-color: var(--gis-hover-tint, rgba(34, 211, 238, 0.08)) !important;
   color: var(--gis-text, #f8fafc) !important;
 }
 
 .result-table :deep(th.el-table__cell) {
-  background: #020617 !important;
+  background: var(--gis-table-header, #020617) !important;
   color: var(--gis-accent, #0ea5e9) !important;
   font-size: 11px;
   font-family: ui-monospace, "Consolas", monospace;
@@ -1307,7 +1386,7 @@ onUnmounted(() => {
 }
 
 .result-table :deep(td.el-table__cell) {
-  background: rgba(15, 23, 42, 0.92) !important;
+  background: var(--gis-bg-panel-2, rgba(15, 23, 42, 0.92)) !important;
   color: var(--gis-text, #f8fafc) !important;
   border-bottom: 1px solid var(--gis-border, #334155) !important;
   font-size: 11px;
@@ -1321,9 +1400,11 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
 }
 
 .empty-icon {

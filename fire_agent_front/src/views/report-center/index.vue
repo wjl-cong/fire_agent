@@ -25,11 +25,12 @@ const loading = ref(false)
 const page = ref(1)
 const pageSize = ref(20)
 const reportType = ref('') // '' | daily | weekly | monthly | special
-const showList = ref(true) // 左侧报告列表面板展开/折叠
 
 // ====== 详情状态 ======
 const currentReport = ref(null)
 const detailLoading = ref(false)
+const detailError = ref('') // 详情加载错误（404 / 请求失败）
+let detailSeq = 0 // 请求序号：快速切换报告时丢弃过期响应，防竞态覆盖
 
 // ====== 报告类型选项 ======
 const typeOptions = [
@@ -64,19 +65,31 @@ const fetchReports = async () => {
 
 // ====== 拉取详情 ======
 const fetchDetail = async (id) => {
+  const seq = ++detailSeq // 本次请求序号
   detailLoading.value = true
+  detailError.value = ''
   try {
     const res = await authFetch(`${API_BASE}/${id}`)
-    const json = await res.json()
-    if (json.code === 200) {
+    if (seq !== detailSeq) return // 已被更新的请求取代，丢弃本次结果
+    if (res.status === 404) {
+      currentReport.value = null
+      detailError.value = '报告不存在或无权限查看'
+      return
+    }
+    const json = await res.json().catch(() => ({}))
+    if (seq !== detailSeq) return
+    if (json.code === 200 && json.data) {
       currentReport.value = json.data
     } else {
-      ElMessage.error(json.detail || '加载详情失败')
+      currentReport.value = null
+      detailError.value = json.detail || json.message || '加载详情失败'
     }
   } catch (e) {
-    ElMessage.error('加载详情失败: ' + e.message)
+    if (seq !== detailSeq) return
+    currentReport.value = null
+    detailError.value = '加载详情失败：' + e.message
   } finally {
-    detailLoading.value = false
+    if (seq === detailSeq) detailLoading.value = false
   }
 }
 
@@ -99,6 +112,7 @@ const handleDelete = async (item) => {
       ElMessage.success('删除成功')
       if (currentReport.value && currentReport.value.id === item.id) {
         currentReport.value = null
+        detailError.value = ''
       }
       fetchReports()
     } else {
@@ -178,10 +192,53 @@ const handleTypeChange = () => {
 }
 
 // ====== Markdown 渲染（支持表格/加粗/代码块） ======
+// 防御：renderMarkdown 对「以 | 开头但不是合法表格」的行会陷入死循环，
+// 导致详情页整页卡死/空白。渲染前先把这类"悬空表格行"转义为普通文本。
+const isTableSep = (s) =>
+  typeof s === 'string' && s.includes('-') && /^\s*\|?[\s:|-]+\|?\s*$/.test(s)
+
+const sanitizeMarkdown = (md) => {
+  const lines = String(md).replace(/\r\n/g, '\n').split('\n')
+  const isPipe = (l) => typeof l === 'string' && l.trim().startsWith('|')
+  const out = lines.slice()
+  let i = 0
+  while (i < lines.length) {
+    if (!isPipe(lines[i])) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < lines.length && isPipe(lines[j])) j++ // 连续以 | 开头的行块
+    // 仅当该块是合法表格（首行紧跟分隔行）时才原样保留，否则整块转义
+    const validTable = j - i >= 2 && isTableSep(lines[i + 1])
+    if (!validTable) {
+      for (let k = i; k < j; k++) out[k] = lines[k].replace(/^(\s*)\|/, '$1\\|')
+    }
+    i = j
+  }
+  return out.join('\n')
+}
+
 const renderHtml = computed(() => {
-  const content = currentReport.value ? (currentReport.value.content || '') : ''
-  return renderMarkdown(content)
+  const raw =
+    currentReport.value && typeof currentReport.value.content === 'string'
+      ? currentReport.value.content
+      : ''
+  if (!raw.trim()) return ''
+  try {
+    return renderMarkdown(sanitizeMarkdown(raw))
+  } catch (e) {
+    return '' // 渲染异常交由模板显示空态，避免整页空白
+  }
 })
+
+// 正文是否有可渲染内容
+const hasContent = computed(
+  () =>
+    !!(currentReport.value &&
+      typeof currentReport.value.content === 'string' &&
+      currentReport.value.content.trim()),
+)
 
 // ====== 语音播报报告（摘要 + 正文前段） ======
 import { speakState, speakText, cleanupSpeech } from '@/utils/speech'
@@ -197,6 +254,42 @@ const typeLabel = (t) => {
   const found = typeOptions.find(o => o.value === t)
   return found ? found.label : (t || '')
 }
+
+// ====== LLM 审计元数据（模型来源 / Token / 降级） ======
+const PROVIDER_LABELS = {
+  aliyun: '阿里百炼',
+  bailian: '阿里百炼',
+  amd: 'AMD GPU Cloud',
+  ollama: '本地 Ollama',
+  deepseek: 'DeepSeek',
+  openai: 'OpenAI',
+}
+// 完整名称（详情头部）；无 provider 说明是模板兜底
+const providerLabel = (p) => (p ? PROVIDER_LABELS[p] || p : '模板生成')
+// 列表内短标签
+const providerShort = (p) => (p ? PROVIDER_LABELS[p] || p : '模板')
+
+// updated_at 与 created_at 不同才展示"更新于"
+const showUpdated = computed(() => {
+  const r = currentReport.value
+  return !!(r && r.updated_at && r.updated_at !== r.created_at)
+})
+
+// Token 总量（优先 total_tokens，否则用 prompt+completion 求和），无则 null
+const tokenTotal = computed(() => {
+  const t = currentReport.value && currentReport.value.llm_tokens
+  if (!t) return null
+  if (t.total_tokens != null) return t.total_tokens
+  const sum = (t.prompt_tokens || 0) + (t.completion_tokens || 0)
+  return sum > 0 ? sum : null
+})
+
+// Token 明细（tooltip）
+const tokenDetail = computed(() => {
+  const t = currentReport.value && currentReport.value.llm_tokens
+  if (!t) return ''
+  return `输入 ${t.prompt_tokens ?? '—'} / 输出 ${t.completion_tokens ?? '—'}`
+})
 
 // ====== 是否由 Agent 自动生成（tags 含 "Agent生成"） ======
 const isAgentGenerated = (item) => {
@@ -216,10 +309,11 @@ onUnmounted(() => {
 <template>
   <div class="report-shell">
     <!-- 页面标题 -->
-    <header class="report-header">
-      <div>
+    <header class="report-header gis-glass">
+      <div class="report-header-left">
         <h1 class="report-title">报告中心</h1>
         <p class="report-subtitle">查看 Agent 自动生成的分析报告，支持预览、导出与归档</p>
+        <p class="datav-en">Report Archive · Agent Generated</p>
       </div>
       <div class="report-header-actions">
         <el-select
@@ -241,13 +335,14 @@ onUnmounted(() => {
 
     <div class="report-body">
       <!-- 左侧：报告列表 -->
-      <aside class="report-list-panel" :class="{ expanded: showList }">
-        <div class="list-header" @click="showList = !showList" title="点击展开/收起">
-          <span class="list-title">报告列表</span>
+      <aside class="report-list-panel gis-glass">
+        <div class="card-header">
+          <span class="card-bar" />
+          <span class="card-title">报告列表</span>
           <span class="list-count">{{ total }}</span>
         </div>
 
-        <div v-if="showList" v-loading="loading" class="list-content">
+        <div v-loading="loading" class="list-content">
           <div v-if="reports.length === 0 && !loading" class="list-empty">
             <div class="empty-icon">▤</div>
             <p>暂无报告</p>
@@ -268,6 +363,9 @@ onUnmounted(() => {
             >×</button>
             <div class="report-item-top">
               <span class="report-type-badge">{{ typeLabel(item.report_type) }}</span>
+              <span class="report-provider-badge" :title="`模型来源：${item.llm_model || providerLabel(item.llm_provider)}`">
+                {{ item.llm_model || providerShort(item.llm_provider) }}
+              </span>
               <span v-if="isAgentGenerated(item)" class="report-agent-badge" title="由 Agent 协作中心自动生成">
                 ReportAgent
               </span>
@@ -294,26 +392,66 @@ onUnmounted(() => {
       </aside>
 
       <!-- 右侧：报告详情 -->
-      <main class="report-detail-panel">
-        <div v-if="!currentReport" class="detail-empty">
+      <main class="report-detail-panel gis-glass" v-loading="detailLoading">
+        <div class="card-header">
+          <span class="card-bar" />
+          <span class="card-title">报告详情</span>
+        </div>
+
+        <div class="detail-scroll">
+        <div v-if="detailError" class="detail-empty">
+          <div class="detail-empty-icon">⚠️</div>
+          <h3>{{ detailError }}</h3>
+          <p>该报告可能已被删除，或您没有查看权限</p>
+        </div>
+
+        <div v-else-if="!currentReport" class="detail-empty">
           <div class="detail-empty-icon">📄</div>
-          <h3>选择左侧报告查看详情</h3>
+          <h3>请从左侧选择一份报告</h3>
           <p>报告由 Agent 协作中心自动生成</p>
         </div>
 
-        <div v-else v-loading="detailLoading" class="detail-content">
+        <div v-else class="detail-content">
           <!-- 详情头部 -->
           <div class="detail-header">
             <div class="detail-header-left">
               <span class="detail-type-badge">{{ typeLabel(currentReport.report_type) }}</span>
+              <span class="provider-badge" :title="`模型来源：${currentReport.llm_model || providerLabel(currentReport.llm_provider)}`">
+                {{ currentReport.llm_model || providerLabel(currentReport.llm_provider) }}
+              </span>
+              <span
+                v-if="currentReport.llm_degraded"
+                class="degrade-badge"
+                title="本次生成发生降级（模板兜底或换用备用 Provider）"
+              >降级产出</span>
               <span v-if="isAgentGenerated(currentReport)" class="report-agent-badge">ReportAgent 生成</span>
               <span class="detail-status">{{ currentReport.status }}</span>
             </div>
             <div class="detail-header-title">{{ currentReport.title }}</div>
+            <!-- 元信息栏：模型来源 / 生成时间 / Token / 标签 -->
             <div class="detail-header-meta">
-              <span>创建时间：{{ currentReport.created_at }}</span>
-              <span v-if="currentReport.tags && currentReport.tags.length">
-                标签：{{ currentReport.tags.join(' / ') }}
+              <span class="meta-item">
+                <span class="meta-label">模型来源</span>
+                <span class="meta-value">{{ currentReport.llm_model || providerLabel(currentReport.llm_provider) }}</span>
+              </span>
+              <span class="meta-item">
+                <span class="meta-label">生成时间</span>
+                <span class="meta-value">{{ currentReport.created_at || '—' }}</span>
+              </span>
+              <span v-if="showUpdated" class="meta-item">
+                <span class="meta-label">更新于</span>
+                <span class="meta-value">{{ currentReport.updated_at }}</span>
+              </span>
+              <span class="meta-item">
+                <span class="meta-label">Token 用量</span>
+                <el-tooltip v-if="tokenTotal != null" :content="tokenDetail || '无明细'" placement="top">
+                  <span class="meta-value">{{ tokenTotal }}</span>
+                </el-tooltip>
+                <span v-else class="meta-value">—</span>
+              </span>
+              <span v-if="currentReport.tags && currentReport.tags.length" class="meta-item">
+                <span class="meta-label">标签</span>
+                <span class="meta-value">{{ currentReport.tags.join(' / ') }}</span>
               </span>
             </div>
           </div>
@@ -349,9 +487,11 @@ onUnmounted(() => {
               <strong>摘要：</strong>{{ currentReport.summary }}
             </div>
             <hr v-if="currentReport.summary" />
-            <div class="detail-markdown" v-html="renderHtml" />
+            <div v-if="hasContent" class="detail-markdown" v-html="renderHtml" />
+            <div v-else class="detail-body-empty">报告内容为空</div>
           </div>
         </div>
+        </div><!-- /detail-scroll -->
       </main>
     </div>
   </div>
@@ -359,24 +499,33 @@ onUnmounted(() => {
 
 <style scoped>
 .report-shell {
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0a0f1e;
-  color: #f8fafc;
+  gap: 20px;
+  padding: 20px;
+  background:
+    radial-gradient(120% 90% at 50% 0%, transparent 60%, rgba(15, 23, 42, 0.05) 100%),
+    var(--gis-atmo-bg);
+  color: var(--gis-text, #f8fafc);
   overflow: hidden;
 }
 
-/* 顶部 */
+/* 顶部通栏页头卡（sc-datav TitleWrapper 基准：高约 64px） */
 .report-header {
+  flex-shrink: 0;
+  min-height: 64px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 24px;
-  border-bottom: 1px solid #1e293b;
-  background: linear-gradient(90deg, #0f172a 0%, #0a0f1e 100%);
-  flex-shrink: 0;
+  gap: 12px;
+  padding: 8px 16px;
+  border-radius: var(--gis-radius-md, 10px);
+}
+.report-header-left {
+  min-width: 0;
 }
 .report-title {
   margin: 0;
@@ -387,7 +536,7 @@ onUnmounted(() => {
 .report-subtitle {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .report-header-actions {
   display: flex;
@@ -395,56 +544,51 @@ onUnmounted(() => {
   gap: 10px;
 }
 
-/* 主体 */
+/* 主体：380px 列表列 + 弹性详情列（sc-datav 两栏网格基准） */
 .report-body {
   flex: 1;
-  display: flex;
   min-height: 0;
-  overflow: hidden;
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 20px;
 }
 
-/* 左列表 */
-.report-list-panel {
-  width: 60px;
+/* 通用卡内标题条：accent 竖条 + 加粗标题 + 底部分隔线 */
+.card-header {
   flex-shrink: 0;
-  border-right: 1px solid #1e293b;
-  display: flex;
-  flex-direction: column;
-  background: #0b1120;
-  overflow: hidden;
-  transition: width 0.2s ease;
-}
-.report-list-panel.expanded {
-  width: 340px;
-}
-.list-header {
   display: flex;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  padding: 14px 8px;
-  border-bottom: 1px solid #1e293b;
-  flex-shrink: 0;
-  cursor: pointer;
-  user-select: none;
-}
-.list-header:hover {
-  background: rgba(14, 165, 233, 0.06);
-}
-.list-title {
-  display: none;
-  font-size: 13px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--gis-border);
   font-weight: 600;
-  color: #e2e8f0;
+  font-size: 14px;
+  color: var(--gis-text, #f8fafc);
 }
-.report-list-panel.expanded .list-title {
-  display: inline;
+.card-bar {
+  flex-shrink: 0;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--gis-accent, #0ea5e9);
+  box-shadow: 0 0 6px var(--gis-accent-dim, rgba(34, 211, 238, 0.45));
+}
+
+/* 左列：报告列表卡 */
+.report-list-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  border-radius: var(--gis-radius-md, 10px);
 }
 .list-count {
   flex-shrink: 0;
+  margin-left: auto;
   font-size: 11px;
-  color: #94a3b8;
-  background: #1e293b;
+  color: var(--gis-text-muted, #94a3b8);
+  background: rgba(148, 163, 184, 0.12);
   padding: 1px 8px;
   border-radius: 10px;
 }
@@ -456,7 +600,7 @@ onUnmounted(() => {
 .list-empty {
   text-align: center;
   padding: 48px 20px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .empty-icon {
   font-size: 36px;
@@ -465,26 +609,27 @@ onUnmounted(() => {
 }
 .empty-hint {
   font-size: 12px;
-  color: #475569;
+  color: var(--gis-text-muted, #475569);
   margin-top: 4px;
 }
 .report-list-item {
   position: relative;
   padding: 12px 14px;
   margin-bottom: 8px;
-  border: 1px solid #1e293b;
-  border-radius: 8px;
-  background: #0f172a;
+  border: 1px solid var(--gis-border);
+  border-radius: var(--gis-radius-sm, 8px);
+  background: var(--gis-glass-2);
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
 }
 .report-list-item:hover {
-  border-color: #334155;
-  background: #172033;
+  border-color: var(--gis-accent-dim);
+  background: var(--gis-hover-tint);
 }
 .report-list-item.active {
-  border-color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.08);
+  border-color: var(--gis-accent, #0ea5e9);
+  background: var(--gis-hover-tint);
+  box-shadow: var(--gis-glow);
 }
 .report-item-delete {
   position: absolute;
@@ -496,7 +641,7 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   font-size: 14px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   background: transparent;
   border: none;
   border-radius: 4px;
@@ -511,13 +656,14 @@ onUnmounted(() => {
 .report-item-top {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 6px;
 }
 .report-type-badge {
   font-size: 10px;
-  color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.12);
+  color: var(--gis-accent, #0ea5e9);
+  background: var(--gis-accent-soft);
   padding: 2px 8px;
   border-radius: 4px;
 }
@@ -538,10 +684,17 @@ onUnmounted(() => {
   padding: 2px 8px;
   border-radius: 4px;
 }
+.report-provider-badge {
+  font-size: 10px;
+  color: var(--gis-text-muted, #94a3b8);
+  background: var(--gis-hover-tint);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
 .report-item-title {
   font-size: 13px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   margin-bottom: 4px;
   display: -webkit-box;
   line-clamp: 1;
@@ -551,7 +704,7 @@ onUnmounted(() => {
 }
 .report-item-summary {
   font-size: 11px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   margin-bottom: 8px;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -565,7 +718,7 @@ onUnmounted(() => {
 }
 .report-item-time {
   font-size: 10px;
-  color: #475569;
+  color: var(--gis-text-muted, #475569);
 }
 .list-pagination {
   padding: 10px 0;
@@ -573,12 +726,19 @@ onUnmounted(() => {
   justify-content: center;
 }
 
-/* 右详情 */
+/* 右列：报告详情卡 */
 .report-detail-panel {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
   min-width: 0;
+  overflow: hidden;
+  border-radius: var(--gis-radius-md, 10px);
+}
+.detail-scroll {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
-  background: #0a0f1e;
 }
 .detail-empty {
   height: 100%;
@@ -586,7 +746,7 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .detail-empty-icon {
   font-size: 48px;
@@ -595,20 +755,20 @@ onUnmounted(() => {
 }
 .detail-empty h3 {
   margin: 0 0 6px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   font-weight: 600;
 }
 .detail-empty p {
   margin: 0;
   font-size: 13px;
-  color: #475569;
+  color: var(--gis-text-muted, #475569);
 }
 .detail-content {
   padding: 24px;
 }
 .detail-header {
   padding-bottom: 16px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
 }
 .detail-header-left {
   display: flex;
@@ -617,8 +777,25 @@ onUnmounted(() => {
 }
 .detail-type-badge {
   font-size: 11px;
-  color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.12);
+  color: var(--gis-accent, #0ea5e9);
+  background: var(--gis-accent-soft);
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+.provider-badge {
+  font-size: 11px;
+  color: var(--gis-text-muted, #94a3b8);
+  background: var(--gis-hover-tint);
+  border: 1px solid var(--gis-border);
+  padding: 3px 10px;
+  border-radius: 4px;
+}
+.degrade-badge {
+  font-size: 11px;
+  font-weight: 600;
+  color: #f59e0b;
+  background: rgba(245, 158, 11, 0.14);
+  border: 1px solid rgba(245, 158, 11, 0.4);
   padding: 3px 10px;
   border-radius: 4px;
 }
@@ -632,103 +809,125 @@ onUnmounted(() => {
 .detail-header-title {
   font-size: 20px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--gis-text, #f8fafc);
+  text-shadow: var(--gis-text-glow);
 }
 .detail-header-meta {
   display: flex;
-  gap: 20px;
-  margin-top: 8px;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 10px;
   font-size: 12px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
+}
+.meta-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.meta-label {
+  color: var(--gis-text-muted, #94a3b8);
+}
+.meta-value {
+  color: var(--gis-text, #f8fafc);
+  font-family: ui-monospace, "Consolas", monospace;
 }
 .detail-actions {
   display: flex;
   gap: 10px;
   padding: 16px 0;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
 }
 .detail-body {
   padding-top: 20px;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
 }
 .detail-summary {
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   line-height: 1.7;
   margin-bottom: 12px;
 }
 .detail-body hr {
   border: none;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--gis-border, #1e293b);
   margin: 16px 0;
+}
+.detail-body-empty {
+  padding: 32px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--gis-text-muted, #94a3b8);
+  border: 1px dashed var(--gis-border);
+  border-radius: var(--gis-radius-sm, 8px);
 }
 
 /* Markdown — v-html 注入内容需用 :deep() 命中（与 Agent 中心一致） */
 .markdown-body :deep(h1) {
   font-size: 22px;
-  color: #f8fafc;
+  color: var(--gis-text);
   margin: 12px 0;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
   padding-bottom: 8px;
 }
 .markdown-body :deep(h2) {
   font-size: 18px;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   margin: 16px 0 8px;
 }
 .markdown-body :deep(h3) {
   font-size: 15px;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
   margin: 14px 0 6px;
 }
 .markdown-body :deep(p) {
   font-size: 13px;
   line-height: 1.8;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
 }
 .markdown-body :deep(li) {
   font-size: 13px;
   line-height: 1.8;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
   margin-left: 20px;
 }
 .markdown-body :deep(li.ol-item) {
   list-style: decimal;
 }
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid #0ea5e9;
+  border-left: 3px solid var(--gis-accent, #0ea5e9);
   padding: 8px 12px;
   margin: 12px 0;
-  background: rgba(14, 165, 233, 0.06);
-  color: #94a3b8;
+  background: var(--gis-hover-tint);
+  color: var(--gis-text-muted, #94a3b8);
   font-size: 12px;
 }
 .markdown-body :deep(strong) {
-  color: #f8fafc;
+  color: var(--gis-text);
   font-weight: 700;
 }
 .markdown-body :deep(em) {
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
 }
 .markdown-body :deep(hr) {
   border: none;
-  border-top: 1px solid #1e293b;
+  border-top: 1px solid var(--gis-border, #1e293b);
   margin: 16px 0;
 }
 .markdown-body :deep(a) {
-  color: #0ea5e9;
+  color: var(--gis-accent, #0ea5e9);
 }
 .markdown-body :deep(code) {
-  background: rgba(30, 41, 59, 0.8);
+  background: var(--gis-glass-solid);
   padding: 1px 5px;
   border-radius: 3px;
   font-family: ui-monospace, "Consolas", monospace;
   font-size: 12px;
-  color: #7dd3fc;
+  color: var(--gis-accent, #0ea5e9);
 }
 .markdown-body :deep(pre) {
-  background: #020617;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-deep);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 4px;
   padding: 12px;
   overflow-x: auto;
@@ -737,7 +936,7 @@ onUnmounted(() => {
 .markdown-body :deep(pre code) {
   background: transparent;
   padding: 0;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
   white-space: pre;
 }
 /* Markdown 表格 */
@@ -751,21 +950,21 @@ onUnmounted(() => {
   font-size: 12px;
 }
 .markdown-body :deep(th) {
-  background: #020617;
-  color: #0ea5e9;
+  background: var(--gis-bg-deep);
+  color: var(--gis-accent, #0ea5e9);
   font-weight: 600;
   padding: 6px 10px;
-  border: 1px solid #334155;
+  border: 1px solid var(--gis-border, #334155);
   text-align: left;
   white-space: nowrap;
 }
 .markdown-body :deep(td) {
   padding: 6px 10px;
-  border: 1px solid #334155;
-  color: #f8fafc;
+  border: 1px solid var(--gis-border, #334155);
+  color: var(--gis-text);
   vertical-align: top;
 }
 .markdown-body :deep(tbody tr:nth-child(even)) {
-  background: rgba(2, 6, 23, 0.3);
+  background: var(--gis-bg-deep);
 }
 </style>

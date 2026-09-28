@@ -101,6 +101,9 @@ const question = ref('')
 const asking = ref(false)
 const answerResult = ref(null)
 const activeSource = ref(null)
+// P2#18：流式增量缓冲（半截内容不落库，done 后以完整结果为准）
+const streamAnswer = ref('')
+const streamMeta = ref(null)
 
 const handleAsk = async () => {
   const q = question.value.trim()
@@ -112,24 +115,67 @@ const handleAsk = async () => {
   asking.value = true
   answerResult.value = null
   activeSource.value = null
+  streamAnswer.value = ''
+  streamMeta.value = null
 
   try {
-    const res = await authFetch(`${API_BASE}/ask`, {
+    // P2#18：优先走流式接口（SSE；EventSource 不支持 POST，用 fetch reader 解析）
+    const res = await authFetch(`${API_BASE}/ask/stream`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ query: q, top_k: 5 }),
     })
-    const json = await res.json()
-    if (json.code === 200) {
-      answerResult.value = json.data
-      loadHistory()
-    } else {
-      ElMessage.error('查询失败: ' + (json.detail || json.message))
+    if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
+
+    const reader = res.body.getReader()
+    const decoder = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buf += decoder.decode(value, { stream: true })
+      const frames = buf.split('\n\n')
+      buf = frames.pop() || ''
+      for (const frame of frames) {
+        const line = frame.split('\n').find(l => l.startsWith('data: '))
+        if (!line) continue
+        let ev
+        try { ev = JSON.parse(line.slice(6)) } catch { continue }
+        if (ev.type === 'meta') {
+          streamMeta.value = ev.retrieval || null   // 检索元信息先行渲染
+        } else if (ev.type === 'delta') {
+          streamAnswer.value += ev.text || ''       // 回答增量打字机
+        } else if (ev.type === 'done') {
+          answerResult.value = ev.result            // 终态完整结果（与 /ask 契约一致）
+        } else if (ev.type === 'error') {
+          throw new Error(ev.message || '流式回答失败')
+        }
+      }
     }
+    if (!answerResult.value) throw new Error('流式回答未返回结果')
+    loadHistory()
   } catch (e) {
-    ElMessage.error('网络错误: ' + e.message)
+    // 流式失败/不支持 → 回退非流式接口，保证总能拿到回答
+    try {
+      const res = await authFetch(`${API_BASE}/ask`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q, top_k: 5 }),
+      })
+      const json = await res.json()
+      if (json.code === 200) {
+        answerResult.value = json.data
+        loadHistory()
+      } else {
+        ElMessage.error('查询失败: ' + (json.detail || json.message))
+      }
+    } catch (e2) {
+      ElMessage.error('网络错误: ' + (e2.message || e.message || e2))
+    }
   } finally {
     asking.value = false
+    streamAnswer.value = ''
+    streamMeta.value = null
   }
 }
 
@@ -231,10 +277,13 @@ onUnmounted(() => {
 
 <template>
   <div class="kb-shell">
-    <!-- 页面标题 -->
+    <!-- 页头卡（sc-datav TitleWrapper 同构：强调竖条 + 标题 + 英文角标） -->
     <header class="kb-header">
-      <h1 class="kb-title">知识库</h1>
-      <p class="kb-subtitle">上传森林防火知识文档，进行智能检索与问答</p>
+      <div class="kb-header-left">
+        <h1 class="kb-title">知识库</h1>
+        <p class="kb-subtitle">上传森林防火知识文档，进行智能检索与问答</p>
+        <p class="datav-en">Knowledge Base · RAG Retrieval</p>
+      </div>
     </header>
 
     <div class="kb-body">
@@ -242,6 +291,7 @@ onUnmounted(() => {
       <aside class="kb-docs" :class="{ expanded: showDocs }">
         <div class="docs-header" @click="showDocs = !showDocs" title="点击展开/收起">
           <span class="docs-title">文档管理</span>
+          <span class="docs-en">Documents</span>
           <span class="docs-count">{{ documents.length }}</span>
         </div>
 
@@ -290,6 +340,7 @@ onUnmounted(() => {
         <!-- 问答历史 -->
         <div class="docs-header history-toggle" title="问答历史">
           <span class="docs-title">问答历史</span>
+          <span class="docs-en">History</span>
           <span class="docs-count">{{ askHistory.length }}</span>
         </div>
         <div v-if="showDocs" class="history-list">
@@ -364,6 +415,17 @@ onUnmounted(() => {
           <div class="qa-hint">Ctrl+Enter 快速提问</div>
         </div>
 
+        <!-- P2#18：回答流式生成中（打字机增量；来源引用在流结束后随 done 附上） -->
+        <div v-if="asking && streamAnswer" class="qa-result">
+          <div class="qa-answer">
+            <div class="qa-answer-header">
+              <span class="qa-answer-badge">RagAgent 回答</span>
+              <span class="qa-stream-badge">生成中</span>
+            </div>
+            <div class="qa-answer-content">{{ streamAnswer }}<span class="stream-cursor">▌</span></div>
+          </div>
+        </div>
+
         <!-- 回答区 -->
       <div v-if="answerResult" class="qa-result">
         <!-- 回答正文 -->
@@ -388,7 +450,7 @@ onUnmounted(() => {
         <!-- RagAgent 检索过程 -->
         <div v-if="answerResult.retrieval" class="qa-retrieval">
           <div class="qa-ref-header">
-            <span class="qa-ref-title">RagAgent 检索过程</span>
+            <span class="qa-ref-title">RagAgent 检索过程<span class="title-en">Retrieval</span></span>
           </div>
           <div class="qa-retrieval-body">
             <div class="qr-stat">
@@ -423,7 +485,7 @@ onUnmounted(() => {
           class="qa-references"
         >
           <div class="qa-ref-header">
-            <span class="qa-ref-title">引用来源（{{ answerResult.references.length }}）</span>
+            <span class="qa-ref-title">引用来源（{{ answerResult.references.length }}）<span class="title-en">References</span></span>
           </div>
           <div class="qa-ref-list">
             <div
@@ -470,14 +532,42 @@ onUnmounted(() => {
   flex-direction: column;
   height: 100%;
   padding: 20px 24px;
-  background: var(--gis-bg-deep, #020617);
+  background: var(--gis-atmo-bg);
   color: var(--gis-text, #f8fafc);
   overflow: hidden;
 }
 
+/* ====== 页头卡（sc-datav TitleWrapper 同构） ====== */
 .kb-header {
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 16px;
+  padding: 12px 20px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
+}
+
+/* sc-datav 标题签名：左侧强调竖条 */
+.kb-header::before {
+  content: '';
+  width: 3px;
+  height: 26px;
+  border-radius: 2px;
+  background: var(--gis-accent, #0ea5e9);
+  box-shadow: var(--gis-glow);
+  flex-shrink: 0;
+}
+
+.kb-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
 }
 
 .kb-title {
@@ -507,9 +597,11 @@ onUnmounted(() => {
   width: 56px;
   display: flex;
   flex-direction: column;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   overflow: hidden;
   transition: width 0.2s ease;
 }
@@ -528,6 +620,32 @@ onUnmounted(() => {
   flex-shrink: 0;
   cursor: pointer;
   user-select: none;
+}
+
+/* sc-datav 标题签名：左侧强调竖条 */
+.docs-header::before {
+  content: '';
+  width: 3px;
+  height: 12px;
+  border-radius: 2px;
+  background: var(--gis-accent, #0ea5e9);
+  flex-shrink: 0;
+}
+
+/* 英文角标（展开态显示，右缀） */
+.docs-en {
+  display: none;
+  margin-left: auto;
+  font-size: 8px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--gis-text-muted, #94a3b8);
+  font-family: ui-monospace, "Consolas", monospace;
+  white-space: nowrap;
+}
+
+.kb-docs.expanded .docs-en {
+  display: inline;
 }
 
 .docs-header:hover {
@@ -551,7 +669,7 @@ onUnmounted(() => {
   font-size: 10px;
   padding: 1px 6px;
   background: var(--gis-accent, #0ea5e9);
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   border-radius: 8px;
   font-weight: 700;
 }
@@ -564,7 +682,7 @@ onUnmounted(() => {
 }
 
 .upload-area :deep(.el-upload-dragger) {
-  background: rgba(2, 6, 23, 0.6) !important;
+  background: var(--gis-mask, rgba(2, 6, 23, 0.6)) !important;
   border: 1px dashed var(--gis-border, #334155) !important;
   border-radius: 3px;
   padding: 16px;
@@ -632,7 +750,7 @@ onUnmounted(() => {
 
 .history-item:hover,
 .history-item.active {
-  background: rgba(14, 165, 233, 0.08);
+  background: rgba(34, 211, 238, 0.08);
 }
 
 .history-item .doc-delete {
@@ -797,9 +915,11 @@ onUnmounted(() => {
 /* 输入区 */
 .qa-input-area {
   flex-shrink: 0;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  border-radius: var(--gis-radius-md, 10px);
   padding: 14px 16px;
 }
 
@@ -825,22 +945,24 @@ onUnmounted(() => {
 
 .qa-input :deep(.el-textarea__inner:focus) {
   border-color: var(--gis-accent, #0ea5e9) !important;
-  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.15) !important;
+  box-shadow: 0 0 0 2px var(--gis-accent-soft, rgba(34, 211, 238, 0.15)) !important;
 }
 
 .qa-btn {
   flex-shrink: 0;
   height: 74px;
   min-width: 80px;
-  background: linear-gradient(135deg, #0ea5e9, #22d3ee) !important;
+  background: var(--gis-metal-accent) !important;
   border: none !important;
-  color: #020617 !important;
+  color: var(--gis-on-accent, #020617) !important;
   font-weight: 600;
   letter-spacing: 0.04em;
+  transition: filter 0.15s, box-shadow 0.15s;
 }
 
 .qa-btn:hover {
-  background: linear-gradient(135deg, #38bdf8, #67e8f9) !important;
+  filter: brightness(1.1) !important;
+  box-shadow: var(--gis-glow-strong) !important;
 }
 
 .qa-examples {
@@ -861,8 +983,8 @@ onUnmounted(() => {
   font-size: 11px;
   padding: 2px 8px;
   color: var(--gis-accent, #0ea5e9);
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.2);
   border-radius: 12px;
   cursor: pointer;
   transition: background 0.15s;
@@ -870,7 +992,7 @@ onUnmounted(() => {
 }
 
 .qa-example-tag:hover {
-  background: rgba(14, 165, 233, 0.2);
+  background: rgba(34, 211, 238, 0.2);
 }
 
 .qa-hint {
@@ -908,10 +1030,12 @@ onUnmounted(() => {
 
 /* 回答正文 */
 .qa-answer {
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
   border-left: 3px solid var(--gis-accent, #0ea5e9);
-  border-radius: 3px;
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
   padding: 14px 16px;
   flex-shrink: 0;
 }
@@ -928,7 +1052,7 @@ onUnmounted(() => {
   font-weight: 600;
   padding: 1px 8px;
   background: var(--gis-accent, #0ea5e9);
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   border-radius: 2px;
   letter-spacing: 0.04em;
 }
@@ -958,13 +1082,41 @@ onUnmounted(() => {
   white-space: pre-wrap;
 }
 
+/* P2#18 流式回答 */
+.qa-stream-badge {
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  animation: qa-stream-pulse 1.2s ease-in-out infinite;
+}
+
+.stream-cursor {
+  display: inline-block;
+  color: #38bdf8;
+  animation: qa-stream-blink 1s step-start infinite;
+}
+
+@keyframes qa-stream-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+
+@keyframes qa-stream-blink {
+  50% { opacity: 0; }
+}
+
 /* 引用来源 */
 .qa-references {
   flex: 1 1 auto;
   min-height: 480px; /* 引用区最小高度（与 Agent 中心报告区一致），配合外层滚动条展示更多内容 */
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 3px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -984,10 +1136,25 @@ onUnmounted(() => {
 }
 
 .qa-ref-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 11px;
   font-weight: 600;
   color: var(--gis-text, #f8fafc);
   letter-spacing: 0.04em;
+}
+
+/* 卡片标题英文角标（sc-datav CardTitle 右缀英文） */
+.title-en {
+  font-size: 8px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gis-text-muted, #94a3b8);
+  opacity: 0.85;
+  font-family: ui-monospace, "Consolas", monospace;
+  white-space: nowrap;
 }
 
 .qa-ref-item {
@@ -1005,7 +1172,7 @@ onUnmounted(() => {
 
 .qa-ref-item:hover,
 .qa-ref-item.active {
-  background: rgba(14, 165, 233, 0.06);
+  background: rgba(34, 211, 238, 0.06);
 }
 
 .qa-ref-index {
@@ -1049,10 +1216,12 @@ onUnmounted(() => {
 /* RagAgent 检索过程 */
 .qa-retrieval {
   flex-shrink: 0;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
   border-left: 3px solid rgba(250, 204, 21, 0.8);
-  border-radius: 3px;
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
   overflow: hidden;
 }
 
@@ -1125,8 +1294,8 @@ onUnmounted(() => {
   font-size: 10px;
   padding: 1px 6px;
   color: var(--gis-accent, #0ea5e9);
-  background: rgba(14, 165, 233, 0.1);
-  border: 1px solid rgba(14, 165, 233, 0.25);
+  background: rgba(34, 211, 238, 0.1);
+  border: 1px solid rgba(34, 211, 238, 0.25);
   border-radius: 8px;
 }
 
@@ -1157,9 +1326,9 @@ onUnmounted(() => {
   padding: 24px;
   font-size: 12px;
   color: var(--gis-text-muted, #94a3b8);
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px dashed var(--gis-border, #334155);
-  border-radius: 3px;
+  background: var(--gis-glass);
+  border: 1px dashed var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
 }
 
 /* 空状态 */
@@ -1170,9 +1339,10 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   gap: 12px;
-  background: var(--gis-bg-panel, #0f172a);
-  border: 1px solid var(--gis-border, #334155);
-  border-radius: 4px;
+  background: var(--gis-glass);
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
 }
 
 .qa-empty-icon {

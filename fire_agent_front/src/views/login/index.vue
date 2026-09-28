@@ -152,47 +152,56 @@ const switchMode = (m) => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #020617;
+  background: var(--gis-bg-deep);
   overflow: hidden;
 }
 .login-bg {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(600px 300px at 20% 20%, rgba(14, 165, 233, 0.15), transparent 60%),
-    radial-gradient(600px 300px at 80% 80%, rgba(34, 211, 238, 0.12), transparent 60%),
-    #020617;
+  background: var(--gis-atmo-bg);
 }
 .login-card {
   position: relative;
   width: 380px;
   padding: 36px 34px 28px;
-  background: rgba(15, 23, 42, 0.85);
-  backdrop-filter: blur(8px);
-  border: 1px solid #1e293b;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  background: var(--gis-glass);
+  backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-lg, 12px);
+  box-shadow: var(--gis-glow), 0 20px 60px rgba(0, 0, 0, 0.5);
+  overflow: hidden;
+}
+.login-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  background: var(--gis-metal-sheen);
+  pointer-events: none;
 }
 .login-title {
   font-size: 16px;
   font-weight: 700;
-  color: #f8fafc;
+  color: var(--gis-text);
   text-align: center;
   line-height: 1.4;
 }
 .login-subtitle {
   margin-top: 6px;
   font-size: 12px;
-  color: #0ea5e9;
+  color: var(--gis-accent, #0ea5e9);
   text-align: center;
   letter-spacing: 0.04em;
+  text-shadow: var(--gis-text-glow);
 }
 .mode-switch {
   display: flex;
   gap: 8px;
   margin: 24px 0 20px;
   padding: 4px;
-  background: #0f172a;
+  background: var(--gis-bg-deep);
   border-radius: 8px;
 }
 .mode-switch button {
@@ -200,7 +209,7 @@ const switchMode = (m) => {
   padding: 8px 0;
   font-size: 13px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--gis-text-muted);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -208,8 +217,8 @@ const switchMode = (m) => {
   transition: all 0.15s;
 }
 .mode-switch button.active {
-  color: #020617;
-  background: #0ea5e9;
+  color: var(--gis-on-accent);
+  background: var(--gis-metal-accent);
 }
 .form-area {
   display: flex;
@@ -223,18 +232,18 @@ const switchMode = (m) => {
 }
 .field span {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted);
 }
 .field input {
   width: 100%;
   padding: 10px 12px;
   font-size: 13px;
-  color: #f8fafc;
-  background: #0f172a;
-  border: 1px solid #1e293b;
-  border-radius: 6px;
+  color: var(--gis-text);
+  background: var(--el-fill-color-blank, rgba(10, 17, 32, 0.6));
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-sm, 6px);
   outline: none;
-  transition: border 0.15s;
+  transition: border 0.15s, box-shadow 0.15s;
 }
 .pwd-wrap {
   position: relative;
@@ -261,28 +270,30 @@ const switchMode = (m) => {
   transition: color 0.15s;
 }
 .eye-btn:hover {
-  color: #38bdf8;
+  color: var(--gis-accent, #38bdf8);
 }
 .field input:focus {
-  border-color: #0ea5e9;
+  border-color: var(--gis-accent, #0ea5e9);
+  box-shadow: var(--gis-glow);
 }
 .field input::placeholder {
-  color: #475569;
+  color: var(--gis-text-muted);
 }
 .submit-btn {
   margin-top: 6px;
   padding: 11px 0;
   font-size: 14px;
   font-weight: 700;
-  color: #020617;
-  background: #0ea5e9;
+  color: var(--gis-on-accent);
+  background: var(--gis-metal-accent);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--gis-radius-sm, 6px);
   cursor: pointer;
-  transition: background 0.15s;
+  transition: filter 0.15s, box-shadow 0.15s;
 }
 .submit-btn:hover:not(:disabled) {
-  background: #38bdf8;
+  filter: brightness(1.1);
+  box-shadow: var(--gis-glow-strong);
 }
 .submit-btn:disabled {
   opacity: 0.6;
@@ -295,7 +306,7 @@ const switchMode = (m) => {
   color: #64748b;
 }
 .login-foot a {
-  color: #0ea5e9;
+  color: var(--gis-accent, #0ea5e9);
   cursor: pointer;
   text-decoration: underline;
 }

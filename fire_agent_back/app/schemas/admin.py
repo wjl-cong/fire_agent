@@ -41,10 +41,18 @@ class ConfigUpdate(BaseModel):
     kb_chunk_overlap: Optional[int] = None
     kb_top_k: Optional[int] = None
 
+    # Rerank 精排（P1）
+    rerank_enabled: Optional[bool] = None
+    rerank_model: Optional[str] = None
+
+    # 流式输出（P2#18）
+    llm_stream_enabled: Optional[bool] = None
+
     # Agent 参数
     orchestrator_temperature: Optional[float] = None
     report_temperature: Optional[float] = None
     max_agents: Optional[int] = None
+    agent_require_approval: Optional[bool] = None  # HITL：报告生成后需人工审批
 
 
 class RoleUpdate(BaseModel):

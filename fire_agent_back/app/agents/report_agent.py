@@ -1,19 +1,20 @@
 """
-报告 Agent — 使用 LangChain LLM 生成分析报告
+报告 Agent — 生成分析报告（LLM 调用统一走 llm_invoker：重试/熔断/降级）
 """
 from app.core.config import settings
-from app.core.llm import get_llm, llm_available
+from app.core.llm import llm_available
+from app.core.llm_invoker import invoke_llm
 
 
 class ReportAgent:
     """报告 Agent：将数据与分析结果转为可读报告"""
 
     def __init__(self, llm_client=None):
-        self.llm = llm_client or get_llm()
+        self.llm = llm_client  # 保留注入能力；实际调用统一走 invoke_llm
 
     async def generate_report(self, data: dict, analysis: dict = None, knowledge: list[str] = None) -> str:
         """生成 Markdown 格式报告（末尾统一追加系统署名）"""
-        if llm_available() and self.llm:
+        if llm_available():
             return await self._generate_with_llm(data, analysis, knowledge) + settings.REPORT_FOOTER
         return self._generate_template(data, analysis, knowledge) + settings.REPORT_FOOTER
 
@@ -50,8 +51,10 @@ class ReportAgent:
 4. 应急建议
 5. 参考依据"""
 
-        resp = self.llm.invoke(prompt)
-        return resp.content if hasattr(resp, "content") else str(resp)
+        res = invoke_llm(prompt)
+        if res is None:
+            return self._generate_template(data, analysis, knowledge)
+        return res.text if res.text else self._generate_template(data, analysis, knowledge)
 
     def _generate_template(self, data: dict, analysis: dict, knowledge: list[str]) -> str:
         """生成模板报告"""

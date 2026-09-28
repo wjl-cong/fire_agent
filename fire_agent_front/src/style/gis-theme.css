@@ -1,87 +1,625 @@
 /**
- * GIS 指挥端主题：高对比、冷色底、青色强调，避免灰蒙半透明叠层
+ * GIS 指挥端主题 — 双主题视觉体系（v3）
+ *
+ * 设计基准：浅色系可视化大屏（参考 knight-L/sc-datav 的空间排布逻辑）——
+ * 清爽色彩 + 极简 UI + 层次分明的信息密度；深色主题作为可切换的第二套皮肤。
+ *
+ * 主题切换机制：
+ *   :root            → 浅色（默认）  主强调色 #2563eb（靛蓝）
+ *   html.dark        → 深色          主强调色 #22d3ee（冰青）
+ *   由 stores/theme.js 在 <html> 上增删 `dark` class，并持久化到 localStorage。
  *
  * 颜色体系说明：
  *   - 背景层级: bg-deep(最深) → bg-panel(面板) → bg-panel-2(卡片)
- *   - 边框层级: border(普通) → border-strong(强调)
- *   - 强调色系: accent(主强调) → accent-dim(柔和)
+ *   - 玻璃层级: glass(一级玻璃面) → glass-2(二级嵌套) → glass-solid(悬浮弹层兜底)
+ *   - 边框层级: border(普通) → border-strong(强调) → glass-border(玻璃高光边)
+ *   - 强调色系: accent(主强调) → accent-dim(柔和) → accent-hover / on-accent(强调底上的文字)
+ *   - 发光体系: glow(默认外发光) → glow-strong(激活态) → line-glow(分隔线) → text-glow(文字微光)
+ *   - 金属体系: metal-accent(主渐变) → metal-sheen(顶部扫光) → metal-edge(顶边亮线) → metal-text(金属字)
+ *   - 氛围光晕: halo-a/b/c 合成于 atmo-bg，逐页壳层一行引用
  *   - 文字层级: text(主文字) → text-muted(次要)
+ *   - 控件补充: scrollbar / hover-tint / table-header / overlay / selection
  */
+
 :root {
-  /* ==================== 背景色 ==================== */
-  /* 最深层背景 - 页面整体底色、全屏遮罩 */
-  --gis-bg-deep: #020617;
-  /* 面板背景 - 顶栏、侧栏、工具栏、对话框 */
-  --gis-bg-panel: #0f172a;
-  /* 深层面板 - 州市预警卡片、火险预警详情面板 */
-  --gis-bg-panel-2: #1e293b;
+    color-scheme: light;
+    /* ==================== 背景色 ==================== */
+    /* 最深层背景 - 页面整体底色、全屏遮罩 */
+    --gis-bg-deep: #eef2f9;
+    /* 面板背景 - 顶栏、侧栏、工具栏、对话框（半透明，透出氛围光晕形成层次） */
+    --gis-bg-panel: rgba(255, 255, 255, 0.82);
+    /* 深层面板 - 州市预警卡片、火险预警详情面板 */
+    --gis-bg-panel-2: rgba(255, 255, 255, 0.94);
+    /* ==================== 玻璃质感（glassmorphism） ==================== */
+    /* 一级玻璃面 - 必须配合 backdrop-filter: blur(var(--gis-glass-blur)) 使用 */
+    --gis-glass: rgba(255, 255, 255, 0.62);
+    /* 二级玻璃 - 嵌套卡片、更通透 */
+    --gis-glass-2: rgba(255, 255, 255, 0.46);
+    /* 兜底玻璃 - 悬浮于地图/瓦片之上的弹层，高不透明度保可读 */
+    --gis-glass-solid: rgba(255, 255, 255, 0.94);
+    /* 玻璃细边框 - 冷色高光边 */
+    --gis-glass-border: rgba(37, 99, 235, 0.14);
+    /* 大屏顶栏渐变（dashboard 页头专用） */
+    --gis-bg-header: linear-gradient(180deg, rgba(255, 255, 255, 0.88) 0%, rgba(241, 245, 249, 0.94) 100%);
+    /* 顶部 1px 内高光（inset 使用，立体感来源） */
+    --gis-glass-highlight: rgba(255, 255, 255, 0.85);
+    /* 玻璃模糊半径与饱和提升（质感关键） */
+    --gis-glass-blur: 14px;
+    --gis-glass-saturate: 150%;
+    /* ==================== 边框色 ==================== */
+    /* 普通边框 - 面板边缘、输入框、表格分隔线 */
+    --gis-border: rgba(100, 116, 139, 0.28);
+    /* 强调边框 - 地图容器外框 */
+    --gis-border-strong: rgba(37, 99, 235, 0.55);
+    /* ==================== 强调色（靛蓝） ==================== */
+    /* 主强调色 - Logo、激活按钮、鼠标坐标、悬停高亮 */
+    --gis-accent: #2563eb;
+    /* 柔和强调色 - 搜索框悬停边框、悬停背景 */
+    --gis-accent-dim: rgba(37, 99, 235, 0.35);
+    /* 强调色 hover 提亮 */
+    --gis-accent-hover: #1d4ed8;
+    /* 强调色浅底（激活导航、选中行、标签底） */
+    --gis-accent-soft: rgba(37, 99, 235, 0.10);
+    /* 强调底色上的文字色（金属渐变按钮/徽标） */
+    --gis-on-accent: #ffffff;
+    /* ==================== 发光线条（克制使用） ==================== */
+    /* 默认外发光 - 面板/控件悬停（浅色下以柔和投影替代发光） */
+    --gis-glow: 0 1px 2px rgba(15, 23, 42, 0.06), 0 0 0 1px rgba(37, 99, 235, 0.10);
+    /* 激活/悬停外发光 - nav 激活、主按钮 hover */
+    --gis-glow-strong: 0 6px 18px rgba(37, 99, 235, 0.18), 0 0 0 1px rgba(37, 99, 235, 0.22);
+    /* 分隔线/顶边发光线 */
+    --gis-line-glow: 0 1px 0 rgba(37, 99, 235, 0.16);
+    /* 强调文字微光（标题/品牌字） */
+    --gis-text-glow: 0 0 10px rgba(37, 99, 235, 0.16);
+    /* ==================== 金属渐变（冷色） ==================== */
+    /* 主金属渐变 - 主按钮、徽标、头像、激活指示条 */
+    --gis-metal-accent: linear-gradient(145deg, #60a5fa 0%, #3b82f6 40%, #2563eb 75%, #1d4ed8 100%);
+    /* 面板顶部金属扫光（叠加在面板渐变上） */
+    --gis-metal-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(255, 255, 255, 0.35) 42%, transparent 100%);
+    /* 面板顶边亮线（border-image / 伪元素） */
+    --gis-metal-edge: linear-gradient(180deg, rgba(37, 99, 235, 0.45) 0%, rgba(37, 99, 235, 0.05) 100%);
+    /* 金属字渐变（配 background-clip: text，见 .gis-metal-text） */
+    --gis-metal-text: linear-gradient(92deg, #0f172a 0%, #1d4ed8 58%, #2563eb 100%);
+    /* ==================== 氛围光晕（柔和漫射，铺在壳层背景） ==================== */
+    --gis-halo-a: radial-gradient(ellipse 60% 45% at 12% -8%, rgba(37, 99, 235, 0.10), transparent 62%);
+    --gis-halo-b: radial-gradient(ellipse 55% 40% at 96% 108%, rgba(59, 130, 246, 0.09), transparent 60%);
+    --gis-halo-c: radial-gradient(ellipse 50% 40% at 78% -14%, rgba(99, 102, 241, 0.07), transparent 65%);
+    /* 页面壳层背景合成值（光晕叠底色，一行替换用；地图画布不受影响） */
+    --gis-atmo-bg: var(--gis-halo-a), var(--gis-halo-b), var(--gis-halo-c), var(--gis-bg-deep);
+    /* ==================== 圆角 / 间距尺度 ==================== */
+    --gis-radius-xs: 4px;
+    /* 控件 */
+    --gis-radius-sm: 6px;
+    /* 卡片 */
+    --gis-radius-md: 10px;
+    /* 面板 */
+    --gis-radius-lg: 14px;
+    /* 对话框/登录卡 */
+    --gis-space-xs: 8px;
+    --gis-space-sm: 12px;
+    --gis-space-md: 16px;
+    --gis-space-lg: 24px;
+    /* ==================== 文字色 ==================== */
+    /* 主文字色 - 标题、正文 */
+    --gis-text: #0f172a;
+    /* 次要文字色 - 副标题、描述、备注、时间 */
+    --gis-text-muted: #64748b;
+    /* ==================== 装饰色 ==================== */
+    /* 背景网格线 - 页面背景装饰图案(48px网格) */
+    --gis-grid: rgba(37, 99, 235, 0.06);
+    /* ==================== 控件补充色 ==================== */
+    /* 滚动条 */
+    --gis-scrollbar: rgba(100, 116, 139, 0.28);
+    --gis-scrollbar-hover: rgba(100, 116, 139, 0.45);
+    /* 表格/列表行悬停微染 */
+    --gis-hover-tint: rgba(37, 99, 235, 0.06);
+    /* 表格表头底 */
+    --gis-table-header: rgba(241, 245, 249, 0.92);
+    /* 弹层/下拉/消息兜底底 */
+    --gis-overlay: #ffffff;
+    /* 半透明遮罩 */
+    --gis-mask: rgba(15, 23, 42, 0.45);
+    /* 文字选中 */
+    --gis-selection: rgba(37, 99, 235, 0.22);
+    /* ==================== Element Plus 基础变量 ==================== */
+    /* 背景体系 */
+    --el-bg-color: #ffffff;
+    --el-bg-color-page: #eef2f9;
+    --el-bg-color-overlay: #ffffff;
+    /* 文字体系 */
+    --el-text-color-primary: #0f172a;
+    --el-text-color-regular: #334155;
+    --el-text-color-secondary: #64748b;
+    --el-text-color-placeholder: #94a3b8;
+    --el-text-color-disabled: #cbd5e1;
+    /* 边框体系 */
+    --el-border-color: #d8e0ea;
+    --el-border-color-light: #e2e8f0;
+    --el-border-color-lighter: #e8edf4;
+    --el-border-color-extra-light: #eef2f8;
+    --el-border-color-dark: #cbd5e1;
+    --el-border-color-dark-2: #b6c2d2;
+    /* 填充体系 */
+    --el-fill-color: #f1f5f9;
+    --el-fill-color-light: #f5f8fc;
+    --el-fill-color-lighter: #f8fafc;
+    --el-fill-color-extra-light: #fbfcfe;
+    --el-fill-color-dark: #e9eff7;
+    --el-fill-color-darker: #e2e8f0;
+    /* 输入框玻璃底 / 遮罩 */
+    --el-fill-color-blank: rgba(255, 255, 255, 0.75);
+    --el-mask-color: rgba(15, 23, 42, 0.45);
+    --el-mask-color-extra-light: rgba(15, 23, 42, 0.2);
+    /* 禁用态 */
+    --el-disabled-bg-color: #f5f8fc;
+    --el-disabled-border-color: #e2e8f0;
+    /* 圆角 */
+    --el-border-radius-base: 6px;
+    --el-border-radius-small: 4px;
+    /* ==================== Element Plus 主色（靛蓝 ramp） ==================== */
+    --el-color-primary: #2563eb;
+    --el-color-primary-light-3: #3b82f6;
+    /* hover 提亮 */
+    --el-color-primary-light-5: #60a5fa;
+    --el-color-primary-light-7: #93c5fd;
+    --el-color-primary-light-8: #bfdbfe;
+    /* plain 边框 */
+    --el-color-primary-light-9: #eff6ff;
+    /* plain 按钮底 */
+    --el-color-primary-dark-2: #1d4ed8;
+    /* ==================== Element Plus 状态色 ==================== */
+    /* success */
+    --el-color-success: #10b981;
+    --el-color-success-light-3: #34d399;
+    --el-color-success-light-5: #6ee7b7;
+    --el-color-success-light-7: #a7f3d0;
+    --el-color-success-light-8: #d1fae5;
+    --el-color-success-light-9: #ecfdf5;
+    --el-color-success-dark-2: #059669;
+    /* warning */
+    --el-color-warning: #f59e0b;
+    --el-color-warning-light-3: #fbbf24;
+    --el-color-warning-light-5: #fcd34d;
+    --el-color-warning-light-7: #fde68a;
+    --el-color-warning-light-8: #fef3c7;
+    --el-color-warning-light-9: #fffbeb;
+    --el-color-warning-dark-2: #d97706;
+    /* danger（UI 危险操作色；与火情风险 5 档色板语义无关） */
+    --el-color-danger: #ef4444;
+    --el-color-danger-light-3: #f87171;
+    --el-color-danger-light-5: #fca5a5;
+    --el-color-danger-light-7: #fecaca;
+    --el-color-danger-light-8: #fee2e2;
+    --el-color-danger-light-9: #fef2f2;
+    --el-color-danger-dark-2: #dc2626;
+    /* info */
+    --el-color-info: #64748b;
+    --el-color-info-light-3: #94a3b8;
+    --el-color-info-light-5: #cbd5e1;
+    --el-color-info-light-7: #e2e8f0;
+    --el-color-info-light-8: #eef2f8;
+    --el-color-info-light-9: #f8fafc;
+    --el-color-info-dark-2: #475569;
+}
 
-  /* ==================== 边框色 ==================== */
-  /* 普通边框 - 面板边缘、输入框、表格分隔线 */
-  --gis-border: #334155;
-  /* 强调边框 - 地图容器外框 */
-  --gis-border-strong: #0ea5e9;
 
-  /* ==================== 强调色 ==================== */
-  /* 主强调色 - Logo、激活按钮、鼠标坐标、悬停高亮 */
-  --gis-accent: #0ea5e9;
-  /* 柔和强调色 - 搜索框悬停边框、悬停背景 */
-  --gis-accent-dim: rgba(34, 211, 238, 0.45);
+/* ==================== 深色主题（html.dark，由 stores/theme.js 切换） ==================== */
 
-  /* ==================== 文字色 ==================== */
-  /* 主文字色 - 标题、正文 */
-  --gis-text: #f8fafc;
-  /* 次要文字色 - 副标题、描述、备注、时间 */
-  --gis-text-muted: #94a3b8;
-
-  /* ==================== 装饰色 ==================== */
-  /* 背景网格线 - 页面背景装饰图案(48px网格) */
-  --gis-grid: rgba(148, 163, 184, 0.08);
-
-  /* ==================== Element Plus 组件主题色 ==================== */
-  /* 按钮、输入框等组件的主色调 */
-  --el-color-primary: #0891b2;
-  --el-color-primary-light-3: #22d3ee;  /* 浅色变体 */
-  --el-color-primary-light-5: #67e8f9;  /* 更浅变体 */
-  --el-color-primary-light-7: #a5f3fc; /* 极浅变体 */
-  --el-color-primary-light-9: #ecfeff;  /* 最浅变体 */
-  --el-color-primary-dark-2: #0e7490;    /* 深色变体 */
+html.dark {
+    color-scheme: dark;
+    /* ==================== 背景色 ==================== */
+    --gis-bg-deep: #020617;
+    --gis-bg-panel: rgba(13, 22, 40, 0.82);
+    --gis-bg-panel-2: rgba(23, 34, 56, 0.88);
+    /* ==================== 玻璃质感 ==================== */
+    --gis-glass: rgba(15, 23, 42, 0.55);
+    --gis-glass-2: rgba(30, 41, 59, 0.38);
+    --gis-glass-solid: rgba(13, 22, 40, 0.9);
+    --gis-glass-border: rgba(148, 197, 253, 0.16);
+    --gis-bg-header: linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(2, 6, 23, 0.82) 100%);
+    --gis-glass-highlight: rgba(255, 255, 255, 0.07);
+    --gis-glass-saturate: 140%;
+    /* ==================== 边框色 ==================== */
+    --gis-border: rgba(70, 100, 145, 0.38);
+    --gis-border-strong: rgba(56, 189, 248, 0.8);
+    /* ==================== 强调色（冰青） ==================== */
+    --gis-accent: #22d3ee;
+    --gis-accent-dim: rgba(34, 211, 238, 0.45);
+    --gis-accent-soft: rgba(34, 211, 238, 0.14);
+    --gis-accent-hover: #67e8f9;
+    --gis-on-accent: #020617;
+    /* ==================== 发光线条 ==================== */
+    --gis-glow: 0 0 0 1px rgba(34, 211, 238, 0.16), 0 0 14px rgba(34, 211, 238, 0.08);
+    --gis-glow-strong: 0 0 0 1px rgba(34, 211, 238, 0.32), 0 0 22px rgba(34, 211, 238, 0.16);
+    --gis-line-glow: 0 1px 0 rgba(34, 211, 238, 0.22);
+    --gis-text-glow: 0 0 12px rgba(34, 211, 238, 0.35);
+    /* ==================== 金属渐变 ==================== */
+    --gis-metal-accent: linear-gradient(145deg, #67e8f9 0%, #22d3ee 35%, #0ea5e9 70%, #0284c7 100%);
+    --gis-metal-sheen: linear-gradient(180deg, rgba(148, 163, 184, 0.10) 0%, rgba(148, 163, 184, 0.03) 38%, transparent 100%);
+    --gis-metal-edge: linear-gradient(180deg, rgba(125, 211, 252, 0.35) 0%, rgba(56, 189, 248, 0.05) 100%);
+    --gis-metal-text: linear-gradient(92deg, #f1f5f9 0%, #7dd3fc 55%, #38bdf8 100%);
+    /* ==================== 氛围光晕 ==================== */
+    --gis-halo-a: radial-gradient(ellipse 60% 45% at 12% -8%, rgba(34, 211, 238, 0.10), transparent 62%);
+    --gis-halo-b: radial-gradient(ellipse 55% 40% at 96% 108%, rgba(56, 189, 248, 0.07), transparent 60%);
+    --gis-halo-c: radial-gradient(ellipse 50% 40% at 78% -14%, rgba(99, 102, 241, 0.06), transparent 65%);
+    /* ==================== 文字色 ==================== */
+    --gis-text: #f8fafc;
+    --gis-text-muted: #94a3b8;
+    /* ==================== 装饰色 ==================== */
+    --gis-grid: rgba(103, 232, 249, 0.05);
+    /* ==================== 控件补充色 ==================== */
+    --gis-scrollbar: rgba(148, 163, 184, 0.28);
+    --gis-scrollbar-hover: rgba(148, 163, 184, 0.45);
+    --gis-hover-tint: rgba(34, 211, 238, 0.08);
+    --gis-table-header: rgba(15, 23, 42, 0.9);
+    --gis-overlay: #1e293b;
+    --gis-mask: rgba(2, 6, 23, 0.7);
+    --gis-selection: rgba(34, 211, 238, 0.3);
+    /* ==================== Element Plus 基础变量（深色适配） ==================== */
+    --el-bg-color: #0d1628;
+    --el-bg-color-page: #020617;
+    --el-bg-color-overlay: #121e38;
+    --el-text-color-primary: #f8fafc;
+    --el-text-color-regular: #cbd5e1;
+    --el-text-color-secondary: #94a3b8;
+    --el-text-color-placeholder: #475569;
+    --el-text-color-disabled: #475569;
+    --el-border-color: #2e3d5c;
+    --el-border-color-light: #283655;
+    --el-border-color-lighter: #22304c;
+    --el-border-color-extra-light: #1c2942;
+    --el-border-color-dark: #3a4d73;
+    --el-border-color-dark-2: #4a6190;
+    --el-fill-color: #16223c;
+    --el-fill-color-light: #1c2a4a;
+    --el-fill-color-lighter: #14203a;
+    --el-fill-color-extra-light: #101a30;
+    --el-fill-color-dark: #0f1930;
+    --el-fill-color-darker: #0b1424;
+    --el-fill-color-blank: rgba(10, 17, 32, 0.6);
+    --el-mask-color: rgba(2, 6, 23, 0.7);
+    --el-mask-color-extra-light: rgba(2, 6, 23, 0.3);
+    --el-disabled-bg-color: #101a30;
+    --el-disabled-border-color: #22304c;
+    /* ==================== Element Plus 主色（冰青 ramp） ==================== */
+    --el-color-primary: #0ea5e9;
+    --el-color-primary-light-3: #38bdf8;
+    --el-color-primary-light-5: #7dd3fc;
+    --el-color-primary-light-7: #bae6fd;
+    --el-color-primary-light-8: rgba(56, 189, 248, 0.35);
+    --el-color-primary-light-9: rgba(34, 211, 238, 0.12);
+    --el-color-primary-dark-2: #0284c7;
+    /* ==================== Element Plus 状态色（深色 ramp，plain 底透明化） ==================== */
+    --el-color-success: #34d399;
+    --el-color-success-light-3: #6ee7b7;
+    --el-color-success-light-5: #a7f3d0;
+    --el-color-success-light-7: rgba(52, 211, 153, 0.35);
+    --el-color-success-light-8: rgba(52, 211, 153, 0.25);
+    --el-color-success-light-9: rgba(52, 211, 153, 0.12);
+    --el-color-success-dark-2: #10b981;
+    --el-color-warning: #fbbf24;
+    --el-color-warning-light-3: #fcd34d;
+    --el-color-warning-light-5: #fde68a;
+    --el-color-warning-light-7: rgba(251, 191, 36, 0.35);
+    --el-color-warning-light-8: rgba(251, 191, 36, 0.25);
+    --el-color-warning-light-9: rgba(251, 191, 36, 0.12);
+    --el-color-warning-dark-2: #f59e0b;
+    --el-color-danger: #f87171;
+    --el-color-danger-light-3: #fca5a5;
+    --el-color-danger-light-5: #fecaca;
+    --el-color-danger-light-7: rgba(248, 113, 113, 0.35);
+    --el-color-danger-light-8: rgba(248, 113, 113, 0.25);
+    --el-color-danger-light-9: rgba(248, 113, 113, 0.12);
+    --el-color-danger-dark-2: #ef4444;
+    --el-color-info: #94a3b8;
+    --el-color-info-light-3: #cbd5e1;
+    --el-color-info-light-5: #e2e8f0;
+    --el-color-info-light-7: rgba(148, 163, 184, 0.35);
+    --el-color-info-light-8: rgba(148, 163, 184, 0.25);
+    --el-color-info-light-9: rgba(148, 163, 184, 0.12);
+    --el-color-info-dark-2: #64748b;
 }
 
 *,
 *::before,
 *::after {
-  box-sizing: border-box;
+    box-sizing: border-box;
 }
 
 html,
 body {
-  margin: 0;
-  width: 100%;
-  max-width: 100%;
-  height: 100%;
-  overflow: hidden;
-  background: var(--gis-bg-deep);
-  color: var(--gis-text);
+    margin: 0;
+    width: 100%;
+    max-width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: var(--gis-bg-deep);
+    color: var(--gis-text);
+    transition: background-color 0.25s ease, color 0.25s ease;
 }
 
 #app {
-  height: 100%;
-  width: 100%;
-  max-width: 100%;
-  overflow: hidden;
-  background: var(--gis-bg-deep);
-  color: var(--gis-text);
+    height: 100%;
+    width: 100%;
+    max-width: 100%;
+    overflow: hidden;
+    background: var(--gis-bg-deep);
+    color: var(--gis-text);
 }
 
-/* Element Plus 弹层与输入在深色下的可读性 */
+
+/* 链接与选中态 */
+
+a {
+    color: var(--gis-accent);
+}
+
+a:hover {
+    color: var(--gis-accent-hover);
+}
+
+::selection {
+    background: var(--gis-selection);
+}
+
+
+/* 全局细滚动条 */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--gis-scrollbar);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--gis-scrollbar-hover);
+}
+
+.el-scrollbar__thumb {
+    background-color: var(--gis-scrollbar);
+}
+
+
+/* ==================== 全局工具类 ==================== */
+
+
+/* 玻璃面：挂 class 即得磨砂玻璃质感（大面积滚动容器禁用 blur，见性能红线） */
+
+.gis-glass {
+    background: var(--gis-glass);
+    backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+    -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+    border: 1px solid var(--gis-glass-border);
+    box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+}
+
+
+/* 金属字：页面大标题用 */
+
+.gis-metal-text {
+    background: var(--gis-metal-text);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+}
+
+
+/* sc-datav 横幅签名：页面页头标题下的英文小字角标（全局类，任意页头可用） */
+
+.datav-en {
+    margin: 3px 0 0;
+    font-size: 9px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: var(--gis-accent, #0ea5e9);
+    opacity: 0.75;
+    font-family: ui-monospace, "Consolas", monospace;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+
+/* 主题切换过渡：仅对配色相关属性生效，避免过渡动画污染布局 */
+
+body,
+.gis-glass,
+.gis-shell,
+.el-card,
+.el-dialog,
+.el-table,
+.el-input__wrapper,
+.el-textarea__inner {
+    transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease;
+}
+
+
+/* ==================== Element Plus 组件级主题适配 ==================== */
+
+
+/* 弹层与下拉 */
+
 .el-popper.is-light,
-.el-select-dropdown {
-  --el-bg-color-overlay: #1e293b;
-  --el-border-color-light: var(--gis-border);
+.el-select-dropdown,
+.el-picker__popper.el-popper {
+    --el-bg-color-overlay: var(--gis-overlay);
+    --el-border-color-light: var(--gis-border);
 }
 
 .el-message {
-  --el-message-bg-color: #1e293b;
-  --el-message-border-color: var(--gis-border);
+    --el-message-bg-color: var(--gis-overlay);
+    --el-message-border-color: var(--gis-border);
+}
+
+
+/* 表格：面板底 + 强调色悬停 */
+
+.el-table {
+    --el-table-bg-color: var(--gis-bg-panel);
+    --el-table-tr-bg-color: transparent;
+    --el-table-header-bg-color: var(--gis-table-header);
+    --el-table-header-text-color: var(--gis-text-muted);
+    --el-table-text-color: var(--gis-text);
+    --el-table-border-color: var(--gis-border);
+    --el-table-row-hover-bg-color: var(--gis-hover-tint);
+}
+
+
+/* 对话框：玻璃兜底 + 投影 */
+
+.el-dialog {
+    --el-dialog-bg-color: var(--gis-glass-solid);
+    border: 1px solid var(--gis-glass-border);
+    border-radius: var(--gis-radius-lg);
+    box-shadow: var(--gis-glow), 0 24px 64px rgba(15, 23, 42, 0.18);
+}
+
+html.dark .el-dialog {
+    box-shadow: var(--gis-glow), 0 24px 64px rgba(0, 0, 0, 0.6);
+}
+
+.el-message-box {
+    --el-messagebox-title-color: var(--gis-text);
+    --el-messagebox-content-color: var(--gis-text);
+    background: var(--gis-glass-solid);
+    border: 1px solid var(--gis-glass-border);
+    border-radius: var(--gis-radius-lg);
+}
+
+
+/* 遮罩 */
+
+.el-overlay {
+    background-color: var(--gis-mask);
+}
+
+
+/* ============================================================
+   大屏系页面控件主题（Agent 协作中心 / 知识库 / 智能查询 / 首页）
+   按钮与输入框高档简约化 v2：
+   - 默认按钮：透明底 + 1px 细边框，hover 点亮 accent 并上浮 1px
+   - 主要按钮：金属渐变底 + 柔和辉光，hover 上浮 / active 回压
+   - 输入框：玻璃底 + 8px 圆角，聚焦 accent 光环，去 EP 默认内阴影
+   ============================================================ */
+
+.gis-shell,
+.agent-shell,
+.kb-shell,
+.query-shell {
+    /* ---- 按钮：默认型（静默克制，hover 才点亮） ---- */
+    .el-button {
+        --el-button-bg-color: transparent;
+        --el-button-border-color: var(--gis-glass-border);
+        --el-button-text-color: var(--gis-text);
+        --el-button-hover-bg-color: var(--gis-accent-soft);
+        --el-button-hover-border-color: var(--gis-accent-dim);
+        --el-button-hover-text-color: var(--gis-accent);
+        --el-button-active-bg-color: var(--gis-accent-soft);
+        --el-button-active-border-color: var(--gis-accent-dim);
+        border-radius: 8px;
+        font-weight: 500;
+        letter-spacing: 0.02em;
+        transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+    }
+    .el-button:not(.el-button--primary):not(.is-text):not(.is-link):hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 14px var(--gis-accent-soft);
+    }
+    .el-button:not(.el-button--primary):not(.is-text):not(.is-link):active {
+        transform: translateY(0);
+        box-shadow: none;
+    }
+    /* 文字钮 / 链接钮：保持轻量 */
+    .el-button.is-text,
+    .el-button.is-link {
+        --el-button-text-color: var(--gis-text-muted);
+        --el-button-hover-text-color: var(--gis-accent);
+    }
+    /* ---- 按钮：主要型（金属渐变 + 辉光，页面唯一视觉重心） ---- */
+    .el-button--primary {
+        --el-button-bg-color: var(--gis-accent);
+        --el-button-border-color: transparent;
+        --el-button-text-color: var(--gis-on-accent);
+        --el-button-hover-bg-color: var(--gis-accent-hover);
+        --el-button-hover-border-color: transparent;
+        --el-button-hover-text-color: var(--gis-on-accent);
+        background: var(--gis-metal-accent);
+        border: none;
+        box-shadow: 0 4px 14px var(--gis-accent-soft), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+    .el-button--primary:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 6px 20px var(--gis-accent-soft), inset 0 1px 0 rgba(255, 255, 255, 0.22);
+    }
+    .el-button--primary:active {
+        transform: translateY(0) scale(0.97);
+    }
+    .el-button--primary.is-disabled {
+        background: var(--gis-accent-dim);
+        box-shadow: none;
+        transform: none;
+    }
+    /* ---- 输入框 / 选择器：玻璃底 + 聚焦 accent 光环 ---- */
+    .el-input__wrapper,
+    .el-select__wrapper {
+        background: var(--gis-glass);
+        backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+        -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+        border-radius: 8px;
+        box-shadow: 0 0 0 1px var(--gis-border) inset !important;
+        transition: box-shadow 0.18s ease, background 0.18s ease;
+    }
+    .el-input__wrapper:hover,
+    .el-select__wrapper:hover {
+        background: var(--gis-glass-2);
+        box-shadow: 0 0 0 1px var(--gis-accent-dim) inset !important;
+    }
+    .el-input__wrapper.is-focus,
+    .el-select__wrapper.is-focused {
+        background: var(--gis-glass-2);
+        box-shadow: 0 0 0 1px var(--gis-accent) inset, 0 0 0 3px var(--gis-accent-soft) !important;
+    }
+    .el-textarea__inner {
+        background: var(--gis-glass);
+        backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+        -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+        color: var(--gis-text);
+        border: 1px solid var(--gis-border);
+        border-radius: 8px;
+        transition: border-color 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+    }
+    .el-textarea__inner:hover {
+        background: var(--gis-glass-2);
+        border-color: var(--gis-accent-dim);
+    }
+    .el-textarea__inner:focus {
+        background: var(--gis-glass-2);
+        border-color: var(--gis-accent);
+        box-shadow: 0 0 0 3px var(--gis-accent-soft);
+    }
+    /* 输入占位文字弱化 */
+    .el-input__inner::placeholder,
+    .el-textarea__inner::placeholder {
+        color: var(--gis-text-muted);
+        opacity: 0.65;
+    }
+    /* 下拉选项悬停跟随 accent */
+    .el-select-dropdown__item.is-hovering,
+    .el-select-dropdown__item:hover {
+        background: var(--gis-accent-soft);
+        color: var(--gis-accent);
+    }
+    .el-select-dropdown__item.is-selected {
+        color: var(--gis-accent);
+        font-weight: 600;
+    }
 }

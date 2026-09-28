@@ -5,12 +5,10 @@
 > **系统定位**：面向云南省森林火险治理场景，将传统 GIS 可视化大屏升级为「自然语言驱动 + 多 Agent 协作 + 知识库增强」的智能决策平台
 > **开发者**：wjl（19136220923@163.com）
 > **源码地址**（gitee）：
->
 > - 后端：https://gitee.com/wjl2004/fire_agent_back
 > - 前端：https://gitee.com/wjl2004/fire_agent_front
->   **系统演示**：https://wjl2004.ffuf.cn/    （手机上可能会把这个网址ban掉）    or     https://8.156.67.47/login
-> - **演示账户**： test       123456
-> - **GitHub 仓库**：https://github.com/wjl-cong/fire_agent（⭐ 欢迎 Star）
+> **系统演示**：https://wjl2004.ffuf.cn/
+> **GitHub 仓库**：https://github.com/wjl-cong/fire_agent（⭐ 欢迎 Star）
 
 ---
 
@@ -28,6 +26,8 @@
 10. [系统特色与创新点](#10-系统特色与创新点)
 11. [总结与展望](#11-总结与展望)
 12. [功能演示](#12-功能演示)
+13. [1.0.1 版本新增内容（相对 1.0.0）](#101-版本新增内容相对-100)
+14. [Agent 技术与市面招聘要求对标分析](#agent-技术与市面招聘要求对标分析)
 
 ---
 
@@ -234,7 +234,7 @@ graph TB
 | 空间 ORM | GeoAlchemy2 | 0.15.1 | POINT / MULTIPOLYGON 几何字段 |
 | 数据库 | PostgreSQL + PostGIS | 14 / 3.5 | 空间数据存储与索引 |
 | 数据校验 | Pydantic + pydantic-settings | 2.9.0 | 请求/响应模型 + .env 配置类 |
-| Agent 编排 | **LangGraph（StateGraph）** | 0.2.64 | 5 节点有向状态图 + 条件边 |
+| Agent 编排 | **LangGraph（StateGraph）** | 0.2.64 | 8 节点有向状态图：并行 fan-out/join + 评审循环 + HITL 审批闸口 |
 | LLM 框架 | **LangChain + langchain-openai** | 0.3.17 | ChatOpenAI / OpenAIEmbeddings |
 | 文本切分 | langchain-text-splitters | 0.3.5 | RecursiveCharacterTextSplitter |
 | PDF 解析 | pdfplumber / pypdf / PyMuPDF / RapidOCR | — | 四层兜底文本提取 |
@@ -575,10 +575,13 @@ flowchart TD
 | 知识库 | POST | `/api/v1/rag/documents` | 上传文档（multipart） |
 | 知识库 | GET | `/api/v1/rag/documents` | 文档列表（用户隔离） |
 | 知识库 | DELETE | `/api/v1/rag/documents/{id}` | 删除文档（文件 + 分片级联） |
-| Agent | POST | `/api/v1/agent/tasks` | 创建并执行任务（LangGraph 全流程 + 报告落库） |
-| Agent | GET | `/api/v1/agent/tasks` | 任务列表 |
+| Agent | POST | `/api/v1/agent/tasks` | 创建任务（**立即返回 task_id，后台异步执行**） |
+| Agent | GET | `/api/v1/agent/tasks` | 任务列表（附报告生成 provider/详细模型名） |
 | Agent | GET | `/api/v1/agent/tasks/{task_id}` | 任务详情（执行步骤 + 报告内容，历史回放） |
+| Agent | GET | `/api/v1/agent/tasks/{task_id}/stream?token=` | **SSE 实时进度**（节点步骤/报告增量/审批/终态，断线重放 last_step_id） |
+| Agent | POST | `/api/v1/agent/tasks/{task_id}/resume` | **HITL 审批恢复**（注入 approve / edit / reject 后续跑） |
 | Agent | DELETE | `/api/v1/agent/tasks/{task_id}` | 删除任务（级联步骤） |
+| Agent | GET | `/api/v1/agent/capabilities` | 「系统能力」面板（编排拓扑/熔断/检查点/MCP/观测的真实运行态） |
 | Agent | GET | `/api/v1/agent/status` | 5 个 Agent 运行状态 |
 | 报告 | GET | `/api/v1/reports/list` | 列表（分页 + 类型筛选） |
 | 报告 | GET | `/api/v1/reports/{id}` | 详情（Markdown 正文） |
@@ -697,75 +700,107 @@ flowchart TD
 2. 向量通道：问题 embedding 与分片 embedding 余弦相似度
 3. 关键词通道：分片命中计数打分（2 字词优先加权）
 4. 加权融合 score = α·cos_sim + β·keyword_score → 归一化
-5. 取 Top-K（默认 5）分片
-6. LLM 生成回答：Prompt 要求必须引用来源编号；
+5. Rerank 精排：DashScope qwen3-rerank 对候选重排（失败/未启用自动降级 RRF 融合原序）
+6. 取 Top-K（默认 5）分片
+7. LLM 生成回答：Prompt 要求必须引用来源编号；
    未检索到匹配文档时明确声明"知识库中无相关内容"
 ```
 
+> **v1.0.1 增强**：`POST /rag/ask/stream` SSE 流式问答（meta→delta→done 三类事件，半截内容不落库，done 后统一入库）；
+> **Adaptive RAG**：按查询复杂度自适应——simple 直通检索一次，complex 最多 3 轮「检索 → 命中不足 → LLM 改写查询」环（app/services/rag_service.py `_adaptive_retrieve`）。
+
 ### 6.6 多 Agent 协作模块（agent.py + OrchestratorAgent）
 
-**LangGraph StateGraph 状态机**：
+**LangGraph StateGraph 状态机（P1 升级拓扑）**：
 
 ```mermaid
 flowchart LR
-    START((START)) --> A[parse_task<br/>Orchestrator·LLM任务拆解]
-    A -->|status=parsed| B[query_data<br/>DataAgent·火点/预测查询]
-    B -->|status=data_ready| C[analyze_gis<br/>GisAgent·网格聚类热点]
-    C -->|status=gis_ready| D[retrieve_knowledge<br/>RagAgent·知识库检索]
-    D -->|status=knowledge_ready| E[generate_report<br/>ReportAgent·LLM报告生成]
-    E -->|status=completed| END((END))
-    A & B & C & D & E -.异常.-> X[error → END]
+    START((START)) --> A[parse_task<br/>Orchestrator·结构化 TaskPlan]
+    A -->|route_after_parse| B[query_data<br/>DataAgent·双数据源查询]
+    A -->|并行 fan-out| D[retrieve_knowledge<br/>RagAgent·知识库检索]
+    B --> C[analyze_gis<br/>GisAgent·网格聚类+风险识别]
+    C --> J[join 汇聚屏障]
+    D --> J
+    J -->|计划含报告| E[generate_report<br/>ReportAgent·七章模板+流式]
+    E --> R[review_report<br/>Reviewer·LLM评审+硬护栏]
+    R -->|不通过 ≤2轮| E
+    R -->|通过| G[approval_gate<br/>HITL·interrupt 暂停]
+    G -->|approve/edit| END((END))
+    G -->|reject 带意见| E
 ```
 
-**全局状态定义（TypedDict）**：
+**全局状态定义（TypedDict，并发安全）**：
 
 ```python
 class AgentState(TypedDict):
-    user_query: str          # 用户原始任务
-    parsed_intent: dict      # 拆解后的子任务计划
+    user_query: str
+    parsed_intent: dict      # parse_task 产出的执行计划（驱动条件路由）
     data_results: dict       # DataAgent 查询结果
     gis_results: dict        # GIS 热点聚类结果
-    knowledge_results: list  # 知识库检索分片
+    knowledge_results: Annotated[list, operator.add]  # 并行节点只写增量（reducer 合并）
     report: str              # 生成的 Markdown 报告
     status: str              # 状态机驱动流转
-    steps: list[dict]        # 步骤日志（前端流水线动画数据源）
+    steps: Annotated[list[dict], operator.add]        # 步骤日志（reducer 合并防并发丢步）
     error: str | None
+    revisions: int           # 评审/驳回重写轮次
+    review_result: dict      # 评审结论 {passed, issues, suggestion, forced?}
+    decision: str            # 审批决策 approve / edit / reject
+    rejection_feedback: str  # 用户驳回意见（注入重写 Prompt）
 ```
 
-**五个 Agent 职责分工**：
+**Agent 职责分工**：
 
 | Agent | 框架 | 职责 |
 |---|---|---|
-| **Orchestrator** | LangGraph | LLM 把用户需求拆解为子任务 JSON 数组；驱动整张状态图；无 LLM 时默认单步计划 |
-| **DataAgent** | LangChain Tool | 封装 FireRepository：历史火点条件查询 + 聚合统计 |
-| **GisAgent** | Shapely/GeoPandas | 0.1° 经纬度网格聚类：统计每格火点数与平均 FRP，≥2 火点判定热点，Top20 排序；缓冲区分析预留 |
-| **RagAgent** | LangChain RAG | 委托 RagService 混合检索，返回引用来源 |
-| **ReportAgent** | LangChain LLM | 将 data_results/gis_results/knowledge_results 注入 Prompt，生成五段式 Markdown 报告（概述/数据分析/风险区域识别/处置建议/参考依据），自动追加系统开发者署名；无 LLM 时模板兜底 |
+| **Orchestrator** | LangGraph | `parse_task` 经 `invoke_structured` 产出 TaskPlan；计划归一化硬约束：query_data / analyze_gis / generate_report 为固定步骤（防"跑完无报告"），LLM 仅决定是否追加 retrieve_knowledge |
+| **DataAgent** | LangChain Tool | 历史火点(2021-2025)+预测火险(2025-2026)**双数据源**查询；结果为空时 LLM 反思放宽参数重查（≤2 轮，`_reflect_and_adjust`） |
+| **GisAgent** | Shapely/GeoPandas | 历史火点 0.1° 网格聚类热点 + 预测数据火险等级 ≥3 高风险州市识别 |
+| **RagAgent** | LangChain RAG | 委托 RagService 混合检索（含 rerank），返回引用来源 |
+| **ReportAgent** | LangChain LLM | 注入真实数据 + MCP 天气 + 用户偏好记忆 + 评审/驳回意见，按**七章刚性模板**生成报告（一、执行摘要 … 六、结论与展望、附：参考依据，标题顺序不可改、≥800 字、max_tokens=4000、真实数据引用、自动追加 REPORT_FOOTER 署名）；支持流式产出；无 LLM 时模板兜底 |
+| **Reviewer** | LLM 评审 | `review_report` 低温度（temperature=0）评审 + 硬护栏一票否决（字数/章节/真实数据引用），不通过带意见退回重写（≤2 轮，超限强制放行并标注） |
+| **HITL** | langgraph interrupt | `approval_gate` 中断暂存于 checkpointer，`POST /tasks/{id}/resume` 注入 approve / edit / reject 后以同 thread_id 续跑 |
 
-**任务执行落库时序**：
+**任务执行时序（v1.0.1 异步化）**：
 
 ```mermaid
 sequenceDiagram
     participant FE as Agent中心
     participant API as agent.py
+    participant W as 后台Worker线程
     participant OA as OrchestratorAgent
     participant DB as PostgreSQL
-    participant LLM as 阿里百炼/AMD
+    participant LLM as 统一LLM层(重试/熔断/降级)
 
-    FE->>API: POST /agent/tasks {user_query}
-    API->>DB: INSERT agent_tasks (status=running)
-    API->>OA: execute(user_query)
-    OA->>LLM: 拆解任务
-    OA->>DB: DataAgent 查询火点/预测
-    OA->>OA: GisAgent 网格聚类
-    OA->>DB: RagAgent 检索 kb_chunks
-    OA->>LLM: 生成报告（注入真实数据）
-    OA-->>API: report + steps + status
-    API->>DB: INSERT agent_task_steps（逐步 payload）
-    API->>DB: INSERT analysis_reports（报告落库）
-    API->>DB: UPDATE agent_tasks（关联 report_id）
-    API-->>FE: 任务结果 + 报告
+    FE->>API: POST /agent/tasks {query}
+    API->>DB: INSERT agent_tasks (running)
+    API-->>FE: 立即返回 task_id
+    API->>W: asyncio.to_thread 后台执行
+    W->>DB: 预写 running 步骤行（节点级进度）
+    W->>OA: iter_steps(user_query)
+    OA->>LLM: parse_task 结构化拆解
+    par query_data ∥ retrieve_knowledge
+        OA->>DB: DataAgent 双源查询（空则反思重试）
+        OA->>DB: RagAgent 混合检索+rerank
+    end
+    OA->>OA: analyze_gis → join 屏障
+    W->>DB: 每节点终态增量落库 agent_task_steps
+    FE->>API: GET /tasks/{id}/stream (SSE 轮询 DB + report_delta 通道)
+    API-->>FE: step / report_delta / approval / report 事件
+    OA->>LLM: generate_report（七章模板，流式推送）
+    OA->>LLM: review_report 评审（硬护栏，≤2轮重写）
+    OA->>DB: interrupt → status=awaiting_approval
+    FE->>API: POST /tasks/{id}/resume {approve|edit|reject}
+    API->>W: 同 thread_id 恢复（checkpointer 续跑）
+    W->>DB: 报告落库 analysis_reports（含 llm_provider/llm_model/tokens 审计）
+    API-->>FE: report 终态事件
 ```
+
+**关键工程约束**（详见 13 章 changelog）：
+
+- `POST /tasks` 立即返回 task_id，任务在线程池执行；节点完成即增量落库 `agent_task_steps`（running 预写 + 终态覆盖，(task_id, step_name) 去重）；
+- SSE `GET /tasks/{id}/stream?token=`：jose 手动解码鉴权、**DB 为事实源**、断线重放 last_step_id、0.6s 轮询 `expire_all`、终态 report 事件、单连接上限 1800s；
+- 每个任务线程独立 `OrchestratorAgent` 实例与 checkpointer 连接（psycopg 非线程安全）；服务重启时 running 任务标记失败，awaiting_approval 可恢复；
+- 报告软删：`AnalysisReport.hidden`（用户自删）/ `deleted`（管理员删），任务详情 `include_deleted` 保证历史回放不受影响。
 
 ### 6.7 报告模块（report.py + ReportRepository）
 
@@ -1089,6 +1124,7 @@ flowchart LR
 | Node.js | 18+（推荐 20） |
 | 数据库 | PostgreSQL 14+ 并启用 PostGIS 扩展 |
 | 网络 | 需访问阿里百炼 / AMD 端点（离线可切 Ollama） |
+| 容器化（可选） | Docker + Docker Compose（一键拉起 postgis + backend + frontend，可选 Langfuse 观测 profile） |
 
 ### 9.2 后端启动步骤
 
@@ -1165,9 +1201,43 @@ KB_UPLOAD_DIR=data/knowledge_base
 KB_CHUNK_SIZE=500
 KB_CHUNK_OVERLAP=50
 KB_TOP_K=5
+
+# Rerank 精排（DashScope qwen3-rerank，使用 LLM_API_KEY；失败自动降级 RRF 融合原序）
+RERANK_ENABLED=true
+RERANK_MODEL=qwen3-rerank
+
+# Agent 参数（P1）：报告生成后需人工审批（HITL）才定稿
+AGENT_REQUIRE_APPROVAL=true
+
+# P2 功能开关
+LLM_STREAM_ENABLED=true     # 全链路流式（报告/RAG 回答逐字推送；关闭回退整段返回）
+PREFERENCES_ENABLED=true    # 用户偏好长期记忆（PostgresStore；关闭后不读写偏好）
+MCP_ENABLED=true            # MCP 高德天气只读数据源（依赖缺失/调用失败静默跳过）
+
+# Langfuse 私有化观测（未启用或未配密钥时降级纯日志）
+LANGFUSE_ENABLED=false
+LANGFUSE_HOST=http://localhost:3000
+LANGFUSE_PUBLIC_KEY=
+LANGFUSE_SECRET_KEY=
+
+# 视觉提供商（视觉可切 aliyun/amd；语音恒定百炼）
+VISION_PROVIDER=aliyun
 ```
 
 > 模型配置也可不写 .env，直接在「系统管理 → 模型接入」页在线填写，保存即写入 .env 并热生效（脱敏回显）。
+
+### 9.5 Docker Compose 一键部署（v1.0.1 新增）
+
+```bash
+cp .env.example .env          # 先准备环境变量（填入真实 Key）
+docker compose up -d          # 拉起 postgis/db + backend + frontend 全栈
+docker compose --profile observability up -d   # 可选：加起 Langfuse 私有化观测
+```
+
+- 后端 `Dockerfile`：python:3.12-slim + 层缓存安装依赖 + curl 健康检查（/health）；
+- 前端镜像内置 `nginx.conf`：`/api` 反代关闭缓冲（`proxy_buffering off`）+ 1800s 读写超时 + HTTP/1.1，保证 SSE 实时进度/报告增量/RAG 流式不被 nginx 缓冲；
+- `docker-compose.yml`：db 健康检查就绪后再启动 backend（容器内 `DATABASE_URL` 自动覆盖为 `db` 主机名），数据卷持久化 PG 数据 / 知识库上传 / 视觉图片；Langfuse 以 profile 可选启动；
+- 全部依赖在 `requirements.txt` 中版本锁（含 langgraph-checkpoint-postgres==2.0.15、psycopg[binary]==3.3.6、langfuse、mcp、langchain-mcp-adapters）。
 
 ---
 
@@ -1203,7 +1273,7 @@ KB_TOP_K=5
 | 1 | RAG 向量以 JSON 存 Text 列 | pgvector VECTOR(1024) 列 + 余弦近邻检索（依赖已装） |
 | 2 | emergency_resources 表空置 | 导入消防站/物资点数据 + 大屏资源图层 |
 | 3 | 部分业务接口未强制鉴权（演示期公开） | 全局 get_current_user 依赖 |
-| 4 | 无自动化测试 | pytest + httpx 核心接口回归 |
+| 4 | pytest 接口级测试仍缺（v1.0.1 已有 golden set 编排回归，见 13 章） | pytest + httpx 核心接口回归 |
 | 5 | 日志仅内存态 | logging 文件轮转 / 结构化日志 |
 | 6 | Alembic 未实际使用 | 生成首个 migration 基线 |
 
@@ -1333,6 +1403,98 @@ KB_TOP_K=5
 ### **12.6.注册登录**
 
 ![](./README.assets/61注册登录.gif)
+
+---
+
+## 13. 1.0.1 版本新增内容（相对 1.0.0）
+
+> 1.0.0 基线 = 初版功能（登录注册 / 2D 作战大屏 / 智能查询 / 知识库 RAG / Agent 协作中心基础版 / 报告中心 / 系统管理基础版）。
+> v1.0.1 围绕「P0 可靠性底座 → P1 编排升级 → P2 工程化模块」演进，以下内容均已落库实现并有代码出处。
+
+### 13.1 P0 可靠性底座与编排升级
+
+1. **统一 LLM 调用层**：`invoke_llm / invoke_structured / stream_llm` 三入口统一全部 LLM 调用——限流/超时/连接类异常指数退避重试（1s/2s/4s）→ 熔断（连续失败 3 次冷却 60s）→ Provider 链（active + aliyun/amd/ollama）自动降级；`LLMResult` 携带 provider/model/tokens/degraded 审计；新代码禁止直接 `get_llm`。→ `app/core/llm_invoker.py`
+2. **LangGraph 状态持久化**：PostgresSaver（langgraph-checkpoint-postgres==2.0.15 + psycopg[binary]==3.3.6，版本锁敏感），失败自动降级 MemorySaver；每个 OrchestratorAgent 实例独享连接（psycopg 非线程安全）。→ `app/core/checkpointer.py`
+3. **任务异步化 + SSE 实时进度 + HITL 审批 + 报告软删**：`POST /tasks` 立即返回 task_id 后台线程执行；节点步骤增量落库（running 预写 + 终态覆盖，(task_id, step_name) 去重）；SSE `GET /tasks/{id}/stream?token=`（jose 手动解码、DB 为事实源、断线重放 last_step_id、0.6s 轮询、终态 report 事件、单连接上限 1800s）；`approval_gate` interrupt → awaiting_approval → `POST /tasks/{id}/resume` 注入 approve/edit/reject；报告软删（`AnalysisReport.hidden` 用户自删 / `deleted` 管理员删，任务详情 include_deleted）。→ `app/api/v1/routes/agent.py`
+4. **编排 P1 升级**：计划驱动路由（TaskPlan 结构化计划，query_data/analyze_gis/generate_report 固定步骤防"跑完无报告"）；query_data ∥ retrieve_knowledge 并行 fan-out/join（operator.add reducer delta 合并）；查询为空 LLM 反思重试（≤2 轮）；review_report 评审循环（低温度评审 + 800 字/章节/数据引用硬护栏，驳回带意见重写 ≤2 轮）；报告七章刚性模板（执行摘要…结论与展望 + 附：参考依据，≥800 字、max_tokens=4000、真实数据引用、REPORT_FOOTER 署名）。→ `app/agents/orchestrator_agent.py`
+
+### 13.2 P2 工程化模块
+
+5. **Langfuse 可观测**：LangGraph config callbacks 全链路 trace（session_id=thread_id 贯穿任务），未启用/无密钥/无 SDK 返回 None 纯日志降级；docker compose `--profile observability` 私有化一键拉起。→ `app/core/observability.py`、`docker-compose.yml`
+6. **回归评估**：golden_set.json **10 用例** + eval_regression.py 四类确定性指标（Tool Correctness / 路由逻辑 / Task Completion+Trajectory / 轻量 Faithfulness），离线（无 DB/LLM 依赖，秒级）/ live 双模式；改 prompt/换模型/改图结构前必跑。→ `scripts/eval_regression.py`、`scripts/golden_set.json`
+7. **MCP 天气数据源**：FastMCP stdio server（高德 geo→adcode→weather）+ langchain-mcp-adapters 客户端；generate_report 注入重点区域实时天气；`MCP_ENABLED` 关闭/依赖缺失/调用失败静默降级。→ `mcp_server/weather_server.py`、`app/core/mcp_client.py`
+8. **用户偏好记忆**：LangGraph PostgresStore（JSONB，不引入 langmem 保护版本锁）；任务完成后 worker 线程 LLM 提取偏好确定性合并（常查州市/时段 ≤5）；ReportAgent 注入偏好上下文。→ `app/core/memory_store.py`
+9. **Docker 化交付**：后端/前端 Dockerfile、前端 nginx.conf（SSE：proxy_buffering off + 1800s）、docker-compose.yml（db 健康检查/Langfuse profile）、.env.example、requirements.txt 全量版本锁。→ 项目根 `Dockerfile`、`docker-compose.yml`、`.env.example`、前端仓库 `nginx.conf`
+10. **节点级实时进度**：worker 预写 running 步骤 + SSE 终态回推（`_predict_next_nodes` 静态预判下一批节点），前端三态渲染防跳动。→ `app/api/v1/routes/agent.py`
+11. **全链路流式**：`stream_llm` 重试/熔断/换 Provider 仅限未产出内容前（半截内容无法跨通道续写）；报告经 report_channels SSE 增量推送（易失通道、半截不落库、DB 唯一事实源）；RAG 新增 `POST /ask/stream`（meta→delta→done）。→ `app/core/llm_invoker.py`、`app/core/report_channels.py`、`app/api/v1/routes/rag.py`
+
+### 13.3 2026-09-28 增量
+
+12. **报告类型自动分类**：`_classify_report_type` 按查询语义正则归类 daily/weekly/monthly/special 落库 `analysis_reports.report_type`。→ `app/api/v1/routes/agent.py`
+13. **报告 llm_model 全链路落库与展示**：详细模型名（如 qwen-max）从 LLMResult → agent 步骤 → 报告行 → 任务列表/详情/报告中心全链路透出（模板生成时为空，前端据此显示"模板生成"）。→ `app/models/report.py`、`app/repositories/report_repository.py`、`app/api/v1/routes/agent.py`
+14. **报告中心类型筛选**：`GET /reports/list?report_type=` 支持 全部/日报/周报/月报/专项 过滤与类型徽标。→ `app/api/v1/routes/report.py`、`app/repositories/report_repository.py`
+
+> 以上能力前端均有配套接入（SSE 订阅、审批卡、报告类型徽标、系统能力面板等），由前端仓库同步交付。
+
+---
+
+## 14. Agent 技术与市面招聘要求对标分析
+
+> 目的：盘点本系统实际用到的 Agent/LLM 工程技术（逐项给代码出处），并对照国内 Agent / LLM 应用工程师招聘 JD 的常见要求逐项标注「已用 / 部分用 / 未用」及未用原因，给出诚实的覆盖率结论。
+
+### 14.1 系统实际使用的 Agent 技术盘点（均有代码出处）
+
+| 技术 | 实现要点 | 代码出处 |
+|---|---|---|
+| 多智能体编排（LangGraph StateGraph） | 8 节点状态图：parse_task → (query_data ∥ retrieve_knowledge) → analyze_gis → join 屏障 → generate_report → review_report → approval_gate，条件边驱动 | `app/agents/orchestrator_agent.py`（build_workflow_graph） |
+| 计划驱动路由 | parse_task 结构化产出 TaskPlan（Pydantic Schema），路由函数只读计划不读 status；query_data/analyze_gis/generate_report 归一化为固定步骤 | `app/agents/orchestrator_agent.py`（TaskPlan/route_after_parse/route_after_join） |
+| 结构化输出 | `with_structured_output`（function calling）优先，失败降级文本调用 + 兜底解析（兼容 ```json 清洗） | `app/core/llm_invoker.py`（invoke_structured）、`app/agents/orchestrator_agent.py`（_parse_plan_text） |
+| 并行 fan-out / join | 路由函数返回 list 触发并行波次；`steps`/`knowledge_results` 用 `operator.add` reducer 只写增量，join 屏障汇聚 | `app/agents/orchestrator_agent.py`（AgentState） |
+| 反思重试（Reflection） | 查询结果为空时 LLM 反思放宽查询参数重查（≤2 轮） | `app/agents/orchestrator_agent.py`（_reflect_and_adjust） |
+| 评审循环 + 硬护栏 | 低温度 LLM 评审（temperature=0）+ 不依赖 LLM 的硬护栏一票否决（≥800 字/必备章节/真实数据引用），驳回带意见重写 ≤2 轮 | `app/agents/orchestrator_agent.py`（review_report） |
+| HITL 人工审批 | approval_gate 使用 langgraph interrupt 暂停，checkpointer 持久化中断态，resume 注入 approve/edit/reject 续跑 | `app/agents/orchestrator_agent.py`、`app/api/v1/routes/agent.py`、`app/core/checkpointer.py` |
+| Checkpoint 持久化 | PostgresSaver（同实例 PostgreSQL），不可用降级 MemorySaver；thread_id 按任务隔离 | `app/core/checkpointer.py` |
+| Token 级流式（SSE） | stream_llm 逐 chunk 产出；报告增量经 report_channels 推送（半截不落库）；节点步骤 SSE + RAG 流式问答 | `app/core/llm_invoker.py`、`app/core/report_channels.py`、`app/api/v1/routes/agent.py`、`app/api/v1/routes/rag.py` |
+| RAG 混合检索 | 中文分词关键词 + 向量余弦 + 关键词加权融合 + bigram 兜底；rerank 精排（qwen3-rerank，失败降级 RRF 融合原序）；Adaptive RAG 复杂查询 LLM 改写环（≤3 轮） | `app/services/rag_service.py`、`app/core/reranker.py` |
+| 文档解析（PDF 四层兜底） | pdfplumber → pypdf → PyMuPDF 文本层 → RapidOCR（扫描版/自定义字体） | `app/services/rag_service.py`（_extract_pdf/_ocr_pdf） |
+| Tool Use / MCP | FastMCP stdio server（高德 geo→adcode→weather 只读工具）+ MultiServerMCPClient 加载，失败静默跳过 | `mcp_server/weather_server.py`、`app/core/mcp_client.py` |
+| 跨会话记忆 | LangGraph PostgresStore（JSONB），任务完成后提取偏好、报告生成时注入 | `app/core/memory_store.py` |
+| 可观测（Langfuse） | LangGraph callbacks 全链路 trace，session 贯穿任务，降级纯日志 | `app/core/observability.py` |
+| 评估回归 | golden set 10 用例 + 四类确定性指标（Tool Correctness/路由/完成度+轨迹/轻量 Faithfulness），离线+live 双模式 | `scripts/eval_regression.py`、`scripts/golden_set.json` |
+| 重试/熔断/多 Provider 容错 | 指数退避（1s/2s/4s）→ 熔断（3 次/60s）→ Provider 链降级 → 规则兜底；token 审计 | `app/core/llm_invoker.py` |
+| Prompt 工程 | 七章刚性模板（标题顺序不可改）、评审/驳回意见注入重写、用户偏好注入、限 max_tokens 控首响延迟 | `app/agents/orchestrator_agent.py` |
+| 多模态 | qwen-vl 火情图像识别（四段结构化）、qwen3-asr-flash 语音识别、qwen3-tts-flash 语音合成 | `app/api/v1/routes/media.py`、`app/core/llm.py` |
+| 容器化交付 | 后端/前端镜像 + compose 编排 + SSE 反代配置 + 版本锁依赖 | `Dockerfile`、`docker-compose.yml`、`.env.example`、前端 `nginx.conf` |
+
+### 14.2 对照国内 Agent/LLM 工程师招聘 JD 常见要求逐项标注
+
+| # | JD 常见要求 | 状态 | 说明 |
+|---|---|---|---|
+| 1 | LangChain / LangGraph | ✅ 已用 | StateGraph 多 Agent 编排 + Checkpointer/Store 全家桶（orchestrator_agent.py/checkpointer.py/memory_store.py） |
+| 2 | LlamaIndex | ❌ 未用 | LangChain 生态已覆盖文档摄取/切分/检索全链路，避免双框架依赖冗余 |
+| 3 | RAG 进阶（rerank / 查询改写 / HyDE / 多路召回） | 🟡 部分用 | rerank（qwen3-rerank+RRF 兜底）与 LLM 查询改写环已用（rag_service.py/reranker.py）；HyDE 未用（火险领域查询短、改写环已够）；多路召回为关键词+向量+bigram 三通道（自研融合，非 BM25 库级多路） |
+| 4 | 向量数据库（pgvector / Milvus / FAISS / Qdrant） | 🟡 部分用 | pgvector 依赖已装预留升级；当前 kb_chunks.embedding 为 Text(JSON) 占位 + NumPy 余弦（app/models/kb_document.py、rag_service.py `_parse_embedding`）——数据规模小（单机知识库），免新增向量库组件，属有意识的权衡 |
+| 5 | Function Calling / Tool Use | ✅ 已用 | with_structured_output 底层即 function calling；MCP 工具接入（llm_invoker.py/mcp_client.py） |
+| 6 | MCP 协议 | ✅ 已用 | FastMCP stdio 天气 server + langchain-mcp-adapters（mcp_server/weather_server.py） |
+| 7 | 多 Agent 框架（AutoGen / CrewAI / Dify） | 🟡 部分用 | 未用这些现成框架，但以 LangGraph 自研实现同等能力（并行/反思/评审/HITL）——自研编排对状态合并与断点恢复更可控 |
+| 8 | Fine-tuning（SFT / LoRA / RLHF） | ❌ 未用 | 提示工程 + 评审循环 + 硬护栏已满足质量要求；无 GPU 训练资源与领域标注数据 |
+| 9 | 知识图谱 / GraphRAG | ❌ 未用 | 知识库为防火规范/预案等文档型语料，实体关系密度低，图构建收益不足 |
+| 10 | 评估（RAGAS / DeepEval） | 🟡 部分用 | 未用现成框架，自研四类确定性指标（golden set 回归，离线秒级不依赖 LLM 评审）；Faithfulness 为轻量规则版 |
+| 11 | 可观测（LangSmith / Langfuse） | ✅ 已用 | Langfuse 私有化接入（observability.py + compose observability profile）；LangSmith 未用（数据不出内网考虑） |
+| 12 | vLLM / 推理优化 | ❌ 未用 | 直接调用百炼/AMD 云端 API，无常驻 GPU 自建推理场景；本地 Ollama 仅作离线兜底 |
+| 13 | 多模态（视觉/语音） | ✅ 已用 | qwen-vl 图像识别 + ASR/TTS 全链路（media.py） |
+
+### 14.3 覆盖率结论（口径透明，不夸大）
+
+- **计算口径**：以上表 13 项国内 Agent/LLM 工程师 JD 高频要求为分母；「✅ 已用」计 1 分、「🟡 部分用」计 0.5 分、「❌ 未用」计 0 分。
+- **结果**：已用 5 项（#1/5/6/11/13）+ 部分用 4 项（#3/4/7/10）= **7 / 13 ≈ 54%**；若按"有涉猎即计入"的宽口径为 9/13 ≈ 69%。
+- **定位**：以「LangGraph 多 Agent 编排 + 生产可靠性工程（重试/熔断/降级/持久化/HITL/流式/评估）」见长——这恰是 JD 中"能把 Agent 系统真正跑进生产"的核心要求；弱项集中在训练侧（Fine-tuning）与推理侧（vLLM），属场景与资源限制而非能力盲区。
+
+### 14.4 补齐建议（按优先级）
+
+1. **P0（低成本高收益）**：启用 pgvector 真 VECTOR 列（依赖已装、改动集中在 kb_chunks 与 rag_service 检索段），向量检索从 JSONB+NumPy 升级为库级近邻；
+2. **P1**：评估侧补 RAGAS（Faithfulness/Answer Relevancy）与 pytest 接口回归，形成「确定性回归 + LLM 评审」双层评估；
+3. **P2（资源允许时）**：接入 BM25 库级多路召回；有 GPU 后以 vLLM 自建 qwen 推理端点接入现有 Provider 链；GraphRAG 与 Fine-tuning 待语料/标注数据积累后再评估。
 
 ---
 

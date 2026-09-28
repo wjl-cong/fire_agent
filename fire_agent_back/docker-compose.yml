@@ -1,0 +1,96 @@
+# 焰哨多Agent与可视化平台 · 全栈一键编排（P2#16）
+#
+# 常用命令：
+#   cp .env.example .env   # 先准备环境变量（填入真实 Key）
+#   docker compose up -d   # 拉起 db + backend + frontend 全栈
+#   docker compose --profile observability up -d   # 额外拉起 Langfuse 私有化观测（配合 .env 中 LANGFUSE_ENABLED=true）
+#   docker compose logs -f backend
+#
+# 说明：
+#   - compose 中 DATABASE_URL 覆盖 .env 同名值（容器内主机名为 db）
+#   - K8s 不做（单机/小规模部署场景，避免过度工程）
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    container_name: fire-agent-db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: fire_agent
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d fire_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    build: .
+    image: fire-agent-backend
+    container_name: fire-agent-backend
+    env_file: .env
+    environment:
+      # 容器网络内数据库主机名为 db（覆盖 .env 中的 localhost）
+      DATABASE_URL: postgresql://postgres:postgres@db:5432/fire_agent
+    volumes:
+      - backend-data:/app/data   # 知识库上传 / 视觉图片持久化
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ../fire_agent_front
+    image: fire-agent-frontend
+    container_name: fire-agent-frontend
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+  # ── 可选：Langfuse 私有化观测（P2#12，docker compose --profile observability up -d）──
+  langfuse-db:
+    image: postgres:16-alpine
+    container_name: fire-agent-langfuse-db
+    profiles: ["observability"]
+    environment:
+      POSTGRES_USER: langfuse
+      POSTGRES_PASSWORD: langfuse
+      POSTGRES_DB: langfuse
+    volumes:
+      - langfuse-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U langfuse"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  langfuse:
+    image: langfuse/langfuse:2
+    container_name: fire-agent-langfuse
+    profiles: ["observability"]
+    environment:
+      DATABASE_URL: postgresql://langfuse:langfuse@langfuse-db:5432/langfuse
+      NEXTAUTH_SECRET: fire-agent-langfuse-secret-change-in-prod
+      SALT: fire-agent-langfuse-salt
+      NEXTAUTH_URL: http://localhost:3000
+      TELEMETRY_ENABLED: "false"
+    ports:
+      - "3000:3000"
+    depends_on:
+      langfuse-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  langfuse-pgdata:
+  backend-data:

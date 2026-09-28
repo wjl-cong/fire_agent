@@ -15,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.llm import get_llm, get_embedding, llm_available
+from app.core.llm_invoker import invoke_llm, stream_llm
+from app.core.reranker import rerank
 from app.models.kb_document import KbDocument, KbChunk
 
 # 中文停用词（检索时过滤，避免"的/了/什么"这类词拉低命中）
@@ -95,6 +97,17 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     if na == 0 or nb == 0:
         return 0.0
     return float(np.dot(a, b) / (na * nb))
+
+
+# Adaptive RAG（P1 #10）：复杂度判定线索（短查询且不含这些线索 → simple 直通）
+_COMPLEX_HINTS = ("为什么", "如何", "怎么", "对比", "分析", "建议", "哪些", "区别", "措施", "方案", "流程", "应该")
+
+
+def _classify_query_complexity(query: str) -> str:
+    """简单规则分类：simple（直通检索一次）/ complex（多轮改写检索环）"""
+    if len(query) < 12 and not any(h in query for h in _COMPLEX_HINTS):
+        return "simple"
+    return "complex"
 
 
 class RagService:
@@ -187,16 +200,18 @@ class RagService:
     # ──────────────────────────────────────
 
     def retrieve(self, query: str, top_k: int = None, user_id: int = None, is_admin: bool = False) -> dict:
-        """混合检索：向量召回 + 关键词召回，返回带检索过程元数据的结果
+        """混合检索（P1 #9）：关键词/向量双通道 Top60 → RRF 融合 → Rerank 精排
 
         用户隔离：普通用户只检索自己的文档分片，管理员检索全部。
+        Rerank 失败/关闭时自动降级为 RRF 融合原序，不阻断检索。
 
         Returns:
             {
-              "items": [ {id, document_id, document_title, content, score, vector_score, keyword_score, ...} ],
+              "items": [ {id, document_id, document_title, content, score, vector_score, keyword_score, rerank_score?, ...} ],
               "total_chunks": 知识库分片总数,
-              "matched_chunks": 命中分片数,
-              "method": "hybrid" | "vector" | "keyword" | "none",
+              "matched_chunks": 融合候选数,
+              "method": "hybrid" | "keyword" | "none"（精排成功时追加 "+rerank" 后缀）,
+              "reranked": 是否经过 Rerank 精排,
               "keywords": [命中的关键词],
               "vector_enabled": 是否有向量可用,
             }
@@ -219,7 +234,7 @@ class RagService:
         if not chunks:
             return {
                 "items": [], "total_chunks": 0, "matched_chunks": 0,
-                "method": "none", "keywords": [], "vector_enabled": False,
+                "method": "none", "reranked": False, "keywords": [], "vector_enabled": False,
                 "total_docs": total_docs, "failed_docs": failed_docs,
                 "failed_doc_titles": failed_doc_titles,
             }
@@ -240,8 +255,8 @@ class RagService:
             except Exception:
                 query_vec = None
 
-        # 3) 逐分片打分
-        results = []
+        # 3) 逐分片打分（全量打分，通道截断放在融合阶段）
+        scored = []
         for c in chunks:
             content_lower = c.content.lower()
             # —— 关键词分：2 字词命中权重更高 ——
@@ -259,7 +274,7 @@ class RagService:
 
             # 任一命中即进入候选池
             if (hits2 + hits3) > 0 or vec_score > 0.05:
-                results.append({
+                scored.append({
                     "id": c.id,
                     "document_id": c.document_id,
                     "document_title": self._doc_title(c.document_id),
@@ -269,11 +284,41 @@ class RagService:
                     "score": round(max(keyword_score, vec_score), 3),
                 })
 
-        # 4) 混合排序：向量分与关键词分加权融合（取 max，向量优先）
-        results.sort(key=lambda x: max(x["vector_score"], x["keyword_score"]), reverse=True)
-        top = results[:k]
+        # 4) 双通道 Top60 → RRF 融合（rrf = Σ 1/(60+rank)，两通道命中叠加增益）
+        _RRF_K = 60
+        kw_ranked = sorted([x for x in scored if x["keyword_score"] > 0],
+                           key=lambda x: -x["keyword_score"])[:60]
+        vec_ranked = sorted([x for x in scored if x["vector_score"] > 0.05],
+                            key=lambda x: -x["vector_score"])[:60]
+        pool: dict = {}
+        for rank, x in enumerate(kw_ranked):
+            x["rrf_score"] = 1.0 / (_RRF_K + rank + 1)
+            pool[x["id"]] = x
+        for rank, x in enumerate(vec_ranked):
+            obj = pool.setdefault(x["id"], x)
+            obj["rrf_score"] = obj.get("rrf_score", 0.0) + 1.0 / (_RRF_K + rank + 1)
+        candidates = sorted(pool.values(), key=lambda x: -x["rrf_score"])
+        results = candidates
 
-        # 5) 严格匹配无结果 → 字符 bigram 包含度兜底
+        # 5) Rerank 精排（qwen3-rerank；关闭/失败自动降级 RRF 原序）
+        reranked = False
+        if candidates:
+            rr = rerank(query, [c["content"] for c in candidates], top_n=k)
+            if rr:
+                top = []
+                for r in rr:
+                    idx = r["index"]
+                    if 0 <= idx < len(candidates):
+                        item = dict(candidates[idx])
+                        item["rerank_score"] = round(r["relevance_score"], 3)
+                        item["score"] = item["rerank_score"]  # 展示用相关度统一为精排分
+                        top.append(item)
+                if top:
+                    candidates = top
+                    reranked = True
+        top = candidates[:k]
+
+        # 6) 严格匹配无结果 → 字符 bigram 包含度兜底
         #    解决「文档已上传但换个说法问不到」：只要查询与分片存在有意义的共同字组，
         #    就返回最相关分片并保留来源引用，避免误报"未检索到"。
         if not top and chunks:
@@ -286,12 +331,12 @@ class RagService:
                 and b not in _STOP_WORDS
             ]
             if q_bi:
-                scored = []
+                scored_bigram = []
                 for c in chunks:
                     cl = c.content.lower()
                     hits = sum(1 for b in q_bi if b.lower() in cl)
                     if hits:
-                        scored.append({
+                        scored_bigram.append({
                             "id": c.id,
                             "document_id": c.document_id,
                             "document_title": self._doc_title(c.document_id),
@@ -301,13 +346,15 @@ class RagService:
                             "score": round(hits / len(q_bi), 3),
                             "overlap_hits": hits,
                         })
-                scored.sort(key=lambda x: -x["score"])
-                if scored and scored[0]["score"] >= 0.12:
-                    top = scored[:k]
-                    results = scored
+                scored_bigram.sort(key=lambda x: -x["score"])
+                if scored_bigram and scored_bigram[0]["score"] >= 0.12:
+                    top = scored_bigram[:k]
+                    results = scored_bigram
 
-        # 6) 汇总方法标识
-        if results and vector_enabled:
+        # 7) 汇总方法标识
+        if reranked:
+            method = ("hybrid" if (results and vector_enabled) else "keyword") + "+rerank"
+        elif results and vector_enabled:
             method = "hybrid"
         elif results:
             method = "keyword"
@@ -319,6 +366,7 @@ class RagService:
             "total_chunks": len(chunks),
             "matched_chunks": len(results),
             "method": method,
+            "reranked": reranked,
             "keywords": query_words,
             "vector_enabled": vector_enabled,
             "total_docs": total_docs,
@@ -326,25 +374,100 @@ class RagService:
             "failed_doc_titles": failed_doc_titles,
         }
 
-    def answer(self, query: str, context: dict = None) -> dict:
-        """基于检索结果生成回答（带 RagAgent 检索过程元数据）
+    # ──────────────────────────────────────
+    # 回答生成（answer / answer_stream 共用部分，P2#18 抽取）
+    # ──────────────────────────────────────
 
-        context 为 retrieve() 的返回值；若未传入则内部执行检索。
+    def _adaptive_retrieve(self, query: str, top_k: int = None, user_id: int = None, is_admin: bool = False):
+        """P1 #10 Adaptive RAG 检索环（answer 与 answer_stream 共用）
+
+        simple 直通一次；complex 最多 3 轮「检索 → 命中不足 → LLM 改写查询」环。
+        返回 (context, 实际使用的 query, rewritten_query, rounds, complexity)。
         """
-        if context is None:
-            context = self.retrieve(query)
+        rewritten_query = ""
+        rounds = 0
+        complexity = _classify_query_complexity(query)
+        context = self.retrieve(query, top_k, user_id=user_id, is_admin=is_admin)
+        if complexity == "complex" and llm_available():
+            for i in range(2):  # 最多 3 轮检索（初次 + 2 次改写）
+                items = context.get("items", [])
+                top_score = items[0].get("score", 0) if items else 0
+                if len(items) >= 3 or (items and top_score >= 0.5):
+                    break
+                # 命中不足 → LLM 改写查询后重检
+                rewrite_res = None
+                try:
+                    rewrite_res = invoke_llm(
+                        f"请将下面的知识库检索查询改写为更容易命中文档的表述"
+                        f"（保留核心关键词，去掉口语化词，不超过60字，仅输出改写后的查询）：\n{query}",
+                        temperature=0.2, max_tokens=80)
+                except Exception:
+                    rewrite_res = None
+                if rewrite_res is None or not rewrite_res.text.strip():
+                    break
+                rewritten_query = rewrite_res.text.strip().splitlines()[0][:100]
+                if rewritten_query == query:
+                    break
+                query = rewritten_query
+                context = self.retrieve(query, top_k, user_id=user_id, is_admin=is_admin)
+                rounds += 1
+        return context, query, rewritten_query, rounds, complexity
 
-        refs = context.get("items", [])
-        retri_meta = {
+    @staticmethod
+    def _retri_meta(context: dict, complexity: str, rewritten_query: str, rounds: int) -> dict:
+        return {
             "total_chunks": context.get("total_chunks", 0),
             "matched_chunks": context.get("matched_chunks", 0),
             "method": context.get("method", "none"),
+            "reranked": context.get("reranked", False),
             "keywords": context.get("keywords", []),
             "vector_enabled": context.get("vector_enabled", False),
+            "complexity": complexity,
+            "rewritten_query": rewritten_query,
+            "rounds": rounds,
             "total_docs": context.get("total_docs", 0),
             "failed_docs": context.get("failed_docs", 0),
             "failed_doc_titles": context.get("failed_doc_titles", []),
         }
+
+    @staticmethod
+    def _rag_prompt(query: str, refs: list) -> str:
+        context_text = "\n\n".join(
+            [f"[来源 {i + 1}（文档：{r.get('document_title', '未知')}）]: {r['content']}" for i, r in enumerate(refs)]
+        )
+        return f"""你是一个森林火险知识助手（RagAgent）。请严格根据下面的参考文档回答用户问题。
+
+要求：
+1. 回答必须基于参考文档中的内容，不得编造文档中不存在的信息；
+2. 在回答中引用对应的来源编号，例如「根据[来源1]…」；
+3. 如果参考文档无法覆盖问题，请明确说明"知识库文档中未找到该信息"；
+4. 用简洁、专业的中文回答。
+
+参考文档：
+{context_text}
+
+用户问题：{query}
+
+回答："""
+
+    def answer(self, query: str, context: dict = None, top_k: int = None,
+               user_id: int = None, is_admin: bool = False) -> dict:
+        """基于检索结果生成回答（带 RagAgent 检索过程元数据）
+
+        P1 #10 Adaptive RAG：未传入 context 时按查询复杂度自适应检索——
+        simple 直通一次；complex 最多 3 轮「检索 → 命中不足 → LLM 改写查询」环。
+        传入 context 则直接使用（跳过自适应环，保持旧契约）。
+        P2#18：user_id/is_admin 透传检索层（用户数据隔离硬约束）。
+        """
+        if context is None:
+            context, query, rewritten_query, rounds, complexity = self._adaptive_retrieve(
+                query, top_k, user_id=user_id, is_admin=is_admin)
+        else:
+            rewritten_query = ""
+            rounds = 0
+            complexity = "preset"
+        refs = context.get("items", [])
+        retri_meta = self._retri_meta(context, complexity, rewritten_query, rounds)
 
         # 未命中任何片段 → 明确告知原因，不让 LLM 凭空发挥
         if not refs:
@@ -403,12 +526,17 @@ class RagService:
 
 回答："""
 
-        llm = get_llm(temperature=0.1)
+        llm_result = None
         try:
-            response = llm.invoke(prompt)
-            answer = response.content if hasattr(response, "content") else str(response)
+            llm_result = invoke_llm(prompt, temperature=0.1)
         except Exception as e:
             answer = f"RagAgent 调用 LLM 失败，已返回原始检索片段。\n\n检索到 {len(refs)} 个相关片段，详见下方引用来源。（{e}）"
+        else:
+            if llm_result is not None:
+                answer = llm_result.text
+            else:
+                answer = (f"RagAgent 调用 LLM 失败（所有模型通道均不可用），已返回原始检索片段。\n\n"
+                          f"检索到 {len(refs)} 个相关片段，详见下方引用来源。")
 
         return {
             "answer": answer,
@@ -416,6 +544,61 @@ class RagService:
             "llm_used": True,
             "retrieval": retri_meta,
         }
+
+    def answer_stream(self, query: str, top_k: int = None,
+                      user_id: int = None, is_admin: bool = False):
+        """流式问答（P2#18）：yield SSE 事件字典流，供 /rag/ask/stream 逐帧转发
+
+        事件流：
+          {"type": "meta", "retrieval": {...}}   检索元信息（先行推送）
+          {"type": "delta", "text": str}         回答增量（逐 token）
+          {"type": "llm_meta", ...}              LLM 审计（provider/degraded，可忽略）
+          {"type": "done", "result": {...}}      终态：完整结果（与 /ask 契约一致，落库以此为准）
+
+        边界：未命中/LLM 不可用/流式失败 → 不出 delta，直接 yield done（复用非流式
+        answer 的兜底语义，传入 context 跳过自适应检索避免二次检索）。
+        """
+        context, query, rewritten_query, rounds, complexity = self._adaptive_retrieve(
+            query, top_k, user_id=user_id, is_admin=is_admin)
+        refs = context.get("items", [])
+        retri_meta = self._retri_meta(context, complexity, rewritten_query, rounds)
+        yield {"type": "meta", "retrieval": retri_meta}
+
+        # 未命中或 LLM 不可用 → 与非流式 answer 同语义的兜底结果
+        if not refs or not llm_available():
+            yield {"type": "done",
+                   "result": self.answer(query, context=context, top_k=top_k,
+                                         user_id=user_id, is_admin=is_admin)}
+            return
+
+        prompt = self._rag_prompt(query, refs)
+        buf: list[str] = []
+        streamed_ok = False
+        try:
+            for chunk in stream_llm(prompt, temperature=0.1):
+                ctype = chunk.get("type")
+                if ctype == "delta":
+                    buf.append(chunk.get("text", ""))
+                    yield {"type": "delta", "text": chunk.get("text", "")}
+                elif ctype == "meta":
+                    streamed_ok = True
+                    yield {"type": "llm_meta", "provider": chunk.get("provider"),
+                           "degraded": bool(chunk.get("degraded"))}
+                    break
+                elif ctype == "error":
+                    break
+        except Exception:
+            streamed_ok = False
+
+        if streamed_ok:
+            yield {"type": "done",
+                   "result": {"answer": "".join(buf), "references": refs,
+                              "llm_used": True, "retrieval": retri_meta}}
+        else:
+            # 流式失败 → 回退非流式（invoke_llm 完整重试链），保证用户总能拿到回答
+            yield {"type": "done",
+                   "result": self.answer(query, context=context, top_k=top_k,
+                                         user_id=user_id, is_admin=is_admin)}
 
     # ──────────────────────────────────────
     # 内部方法

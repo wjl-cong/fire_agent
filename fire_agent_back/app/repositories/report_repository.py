@@ -24,6 +24,10 @@ class ReportRepository:
             content=req.content,
             tags=req.tags,
             status="published",
+            llm_provider=req.llm_provider,
+            llm_model=getattr(req, "llm_model", None),
+            llm_tokens=req.llm_tokens,
+            llm_degraded=bool(req.llm_degraded),
             created_at=now,
             updated_at=now,
         )
@@ -64,6 +68,9 @@ class ReportRepository:
                     "tags": r.tags,
                     "status": r.status,
                     "owner_hidden": bool(r.hidden),
+                    "llm_provider": r.llm_provider,
+                    "llm_model": r.llm_model,
+                    "llm_degraded": bool(r.llm_degraded),
                     "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
                 }
                 for r in items
@@ -95,7 +102,12 @@ class ReportRepository:
             "content": r.content,
             "tags": r.tags,
             "status": r.status,
+            "llm_provider": r.llm_provider,
+            "llm_model": r.llm_model,
+            "llm_tokens": r.llm_tokens,
+            "llm_degraded": bool(r.llm_degraded),
             "created_at": r.created_at.strftime("%Y-%m-%d %H:%M:%S") if r.created_at else None,
+            "updated_at": r.updated_at.strftime("%Y-%m-%d %H:%M:%S") if r.updated_at else None,
         }
 
     def delete(self, report_id: int, user_id: int = None, is_admin: bool = False) -> bool:
@@ -120,11 +132,16 @@ class ReportRepository:
 
     def upsert_from_task(self, title: str, content: str, summary: str = None,
                          report_type: str = "special", tags: list = None,
-                         user_id: int = None) -> AnalysisReport:
+                         user_id: int = None, llm_provider: str = None,
+                         llm_model: str = None,
+                         llm_tokens: dict = None, llm_degraded: bool = False) -> AnalysisReport:
         """将 Agent 分析结果落库为报告，按「标题 + 归属用户」去重
 
         注意：仅在同一用户范围内按标题去重，绝不占用/覆盖其他用户或旧版
         无归属（NULL）报告，避免不同用户互相覆盖、串看内容。
+
+        llm_provider / llm_tokens / llm_degraded：本次生成的 LLM 审计元数据，
+        随内容一并刷新（重生成时用最新一次的实际 Provider 覆盖旧值）。
         """
         q = self.db.query(AnalysisReport).filter(AnalysisReport.title == title)
         if user_id is not None:
@@ -138,6 +155,10 @@ class ReportRepository:
             if tags:
                 existing.tags = tags
             existing.hidden = False  # 重新生成视为新报告，恢复归属用户可见
+            existing.llm_provider = llm_provider
+            existing.llm_model = llm_model
+            existing.llm_tokens = llm_tokens
+            existing.llm_degraded = bool(llm_degraded)
             existing.updated_at = now
             self.db.commit()
             self.db.refresh(existing)
@@ -149,6 +170,10 @@ class ReportRepository:
                 summary=summary,
                 content=content,
                 tags=tags,
+                llm_provider=llm_provider,
+                llm_model=llm_model,
+                llm_tokens=llm_tokens,
+                llm_degraded=bool(llm_degraded),
             ),
             user_id=user_id,
         )

@@ -3,10 +3,14 @@ RAG 知识库接口 — 文档管理 & 检索问答 & 问答历史
 
 用户隔离：普通用户仅能访问/检索/删除自己的文档与历史；管理员可见全部。
 """
+import asyncio
+import json
 import os
+import threading
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
@@ -42,16 +46,25 @@ def _save_history(db: Session, user_id: int, query: str, result: dict):
     db.commit()
 
 
+def _sse(payload: dict) -> str:
+    """格式化 SSE 数据帧"""
+    return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
+
+
 @router.post("/ask")
 async def rag_ask(
     req: RagAskRequest,
     db: Session = Depends(get_db),
     current: User = Depends(get_current_user),
 ):
-    """RAG 问答（仅检索当前用户可见的文档），自动保存问答历史"""
+    """RAG 问答（仅检索当前用户可见的文档），自动保存问答历史
+
+    P1 Adaptive RAG：由 RagService.answer 内部按查询复杂度自适应检索
+    （simple 直通 / complex 最多 3 轮改写检索环），无需外部预取。
+    """
     svc = RagService(db)
-    result = svc.retrieve(req.query, req.top_k, user_id=current.id, is_admin=current.role == "admin")
-    result = svc.answer(req.query, result)
+    result = svc.answer(req.query, top_k=req.top_k,
+                        user_id=current.id, is_admin=current.role == "admin")
     try:
         _save_history(db, current.id, req.query, result)
     except Exception:
@@ -61,6 +74,62 @@ async def rag_ask(
         "message": "success",
         "data": result,
     }
+
+
+@router.post("/ask/stream")
+async def rag_ask_stream(
+    req: RagAskRequest,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user),
+):
+    """RAG 流式问答（P2#18，SSE；EventSource 不支持 POST，前端用 fetch reader 解析）
+
+    事件流：
+      - type=meta    检索元信息（先行推送，前端可先渲染来源/命中区）
+      - type=delta   回答增量（逐 token，有什么内容就输出什么内容）
+      - type=done    终态：完整 answer 结果（与 /ask 契约一致，落库以此为准）
+      - type=error   异常终态
+    边界：流式中断的半截内容不落库，完整结果在 done 事件后统一入库。
+    """
+    svc = RagService(db)
+
+    async def gen():
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+
+        def produce():
+            try:
+                for ev in svc.answer_stream(req.query, top_k=req.top_k,
+                                            user_id=current.id, is_admin=current.role == "admin"):
+                    loop.call_soon_threadsafe(q.put_nowait, ev)
+            except Exception as e:
+                loop.call_soon_threadsafe(q.put_nowait, {"type": "error", "message": str(e)[:200]})
+            finally:
+                loop.call_soon_threadsafe(q.put_nowait, None)
+
+        threading.Thread(target=produce, daemon=True).start()
+        result = None
+        try:
+            while True:
+                ev = await q.get()
+                if ev is None:
+                    break
+                if ev.get("type") == "done":
+                    result = ev.get("result")
+                yield _sse(ev)
+        except asyncio.CancelledError:
+            raise  # 客户端断开：半截内容不落库
+        if result:
+            try:
+                _save_history(db, current.id, req.query, result)
+            except Exception:
+                db.rollback()
+
+    return StreamingResponse(
+        gen(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @router.get("/history")

@@ -161,8 +161,14 @@ def _current_config() -> dict:
             "kb_chunk_size": settings.KB_CHUNK_SIZE,
             "kb_chunk_overlap": settings.KB_CHUNK_OVERLAP,
             "kb_top_k": settings.KB_TOP_K,
+            "rerank_enabled": settings.RERANK_ENABLED,
+            "rerank_model": settings.RERANK_MODEL,
+            "llm_stream_enabled": settings.LLM_STREAM_ENABLED,
         },
-        "agent": dict(AGENT_CONFIG),
+        "agent": {
+            **dict(AGENT_CONFIG),
+            "require_approval": settings.AGENT_REQUIRE_APPROVAL,
+        },
     }
 
 
@@ -198,6 +204,10 @@ async def update_config(req: ConfigUpdate, current: User = Depends(get_current_u
         "kb_chunk_size": "KB_CHUNK_SIZE",
         "kb_chunk_overlap": "KB_CHUNK_OVERLAP",
         "kb_top_k": "KB_TOP_K",
+        "rerank_enabled": "RERANK_ENABLED",
+        "rerank_model": "RERANK_MODEL",
+        "llm_stream_enabled": "LLM_STREAM_ENABLED",
+        "agent_require_approval": "AGENT_REQUIRE_APPROVAL",
     }
     changed_config = False
     for field, env_key in mappings.items():

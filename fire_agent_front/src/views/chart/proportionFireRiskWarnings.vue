@@ -9,7 +9,9 @@ import { onMounted, ref, nextTick, onUnmounted, computed, watch } from 'vue'
 import * as echarts from 'echarts'
 import predictMonthJson from '@/assets/predict_2025_2026_month.json'
 import predictDailyJson from '@/assets/predict_2025_2026_daily.json'
-import { gisChartPalette, riskLevelColors } from '@/utils/echartsGisTheme'
+import { riskLevelColors } from '@/utils/echartsGisTheme'
+import { chartTokens } from '@/utils/themeTokens'
+import { useThemeStore } from '@/stores/theme'
 import { fireIndexToLevel, riskScoreToLevel } from '@/utils/riskLevel'
 
 // 接收 searchDate、viewMode 和 predictData
@@ -27,6 +29,9 @@ const props = defineProps({
     default: null
   }
 })
+
+// 主题 Store（切换主题时重建图表）
+const theme = useThemeStore()
 
 // 小图 / 全屏图容器
 const chartRef = ref(null)
@@ -170,20 +175,22 @@ const clonePieData = () =>
   }))
 
 // 饼图配置
-const getOption = () => ({
+const getOption = () => {
+  const t = chartTokens()
+  return {
   backgroundColor: 'transparent',
   tooltip: {
     trigger: 'item',
-    backgroundColor: gisChartPalette.bgTooltip,
-    borderColor: gisChartPalette.axis,
+    backgroundColor: t.panel,
+    borderColor: t.border,
     borderWidth: 1,
-    textStyle: { color: gisChartPalette.textStrong, fontSize: 12 },
+    textStyle: { color: t.text, fontSize: 12 },
     formatter: '{b}: {c} ({d}%)'
   },
   legend: {
     bottom: '2%',
     left: 'center',
-    textStyle: { color: gisChartPalette.text, fontSize: 10 },
+    textStyle: { color: t.muted, fontSize: 10 },
     itemWidth: 10,
     itemHeight: 10
   },
@@ -195,7 +202,7 @@ const getOption = () => ({
     avoidLabelOverlap: false,
     itemStyle: {
       borderRadius: 0,
-      borderColor: gisChartPalette.axis,
+      borderColor: t.border,
       borderWidth: 1
     },
     label: {
@@ -207,7 +214,7 @@ const getOption = () => ({
         show: true,
         fontSize: 14,
         fontWeight: 600,
-        color: gisChartPalette.textStrong
+        color: t.text
       }
     },
     labelLine: {
@@ -215,30 +222,32 @@ const getOption = () => ({
     },
     data: clonePieData()
   }]
-})
+  }
+}
 
 const getMaxChartOption = () => {
   const base = getOption()
+  const t = chartTokens()
   const s0 = base.series[0]
   return {
     ...base,
     legend: {
       bottom: '5%',
       left: 'center',
-      textStyle: { color: gisChartPalette.text, fontSize: 13 }
+      textStyle: { color: t.muted, fontSize: 13 }
     },
     series: [{
       ...s0,
       label: {
         show: true,
         position: 'outside',
-        color: gisChartPalette.textStrong,
+        color: t.text,
         formatter: '{b}: {c} ({d}%)',
         fontSize: 13
       },
       labelLine: {
         show: true,
-        lineStyle: { color: gisChartPalette.axis }
+        lineStyle: { color: t.border }
       },
       center: ['50%', '50%']
     }]
@@ -302,6 +311,14 @@ watch(
   }
 )
 
+// 主题切换时重建图表（实时重新读取主题 Token）
+watch(
+  () => theme.mode,
+  () => {
+    nextTick(() => applyChartDataToInstances())
+  }
+)
+
 onMounted(() => {
   initChart()
   window.addEventListener('resize', handleResize)
@@ -352,7 +369,7 @@ onUnmounted(() => {
                 stripe
                 border
                 style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"
-                :header-cell-style="{ background: '#f8fafc', color: '#606266', fontWeight: 'bold' }"
+                :header-cell-style="{ background: 'var(--gis-table-header)', color: 'var(--gis-text-muted)', fontWeight: 'bold' }"
               >
                 <el-table-column prop="City" label="城市" min-width="120" />
                 <el-table-column prop="displayDate" :label="viewMode === 'daily' ? '日期' : '月份'" min-width="100" sortable />
@@ -418,11 +435,11 @@ onUnmounted(() => {
     top: 0;
     right: 0;
     cursor: pointer;
-    color: #94a3b8;
+    color: var(--gis-text-muted, #94a3b8);
     z-index: 10;
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 4px;
+    background: var(--gis-glass-solid);
+    border: 1px solid var(--gis-border);
+    border-radius: var(--gis-radius-xs, 4px);
     width: 24px;
     height: 24px;
     display: flex;
@@ -430,7 +447,8 @@ onUnmounted(() => {
     justify-content: center;
 
     &:hover {
-      background: #1e293b;
+      background: var(--gis-accent-soft);
+      box-shadow: var(--gis-glow);
     }
   }
 
@@ -447,7 +465,7 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   z-index: 2000;
-  background: #020617;
+  background: var(--gis-atmo-bg);
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -462,9 +480,10 @@ onUnmounted(() => {
 
     .max-title {
       font-size: 22px;
-      color: #f8fafc;
+      color: var(--gis-text, #f8fafc);
       font-weight: 600;
       letter-spacing: 0.04em;
+      text-shadow: var(--gis-text-glow);
     }
   }
 
@@ -477,9 +496,9 @@ onUnmounted(() => {
     .chart-area-max {
       width: 40%;
       height: 100%;
-      background: #0f172a;
+      background: var(--gis-bg-panel);
       border-radius: 2px;
-      border: 1px solid #334155;
+      border: 1px solid var(--gis-border);
     }
 
     .table-area {

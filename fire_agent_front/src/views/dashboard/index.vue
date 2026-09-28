@@ -13,9 +13,10 @@
  * 依赖：Vue3 | OpenLayers | ECharts | Element Plus | Turf.js | 天地图 | 高德天气API
  * ============================================================================
  */
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick } from 'vue'
 import Clock from '@/components/clock.vue'                          // 实时时钟
 import MapModule from '@/components/map.vue'                       // OpenLayers 地图核心
+import Map3D from '@/components/Map3D.vue'                         // Three.js 3D 地图（sc-datav 风格）
 import { downloadMap } from '@/utils/downLoad'                    // 地图导出 PNG
 import { upDateCurrentTime, upDateCurrentDate, fethLocation } from '@/utils/timeWeather'
 import { createDraw } from '@/utils/draw'                        // OL Draw 交互
@@ -484,6 +485,27 @@ const toggleDataType = (type) => {
   })
 }
 
+// ====== 地图模式：3D（Three.js） / 2D（OpenLayers 完整工具） ======
+const mapMode = ref('3d')
+const map3dRef = ref(null)
+const switchMapMode = (m) => {
+  mapMode.value = m
+  if (m === '2d') {
+    // v-show 从隐藏到显示后，OpenLayers 需重算画布尺寸
+    nextTick(() => { try { mapRef.value?.resize?.() } catch { /* 忽略 */ } })
+  }
+}
+// 3D 模式点击州市 → 与 2D「检索」同链路（筛选 + 预警联动）
+const handleMap3DCityClick = (city) => {
+  searchCity.value = city
+  handleSearch()
+}
+// 3D 模式下导出按钮守卫（OL 画布隐藏）
+const handleDownload = () => {
+  if (mapMode.value === '3d') return
+  downloadMap(map)
+}
+
 // ====== 检索：定位州市 + 筛选日期 ======
 const handleSearch = () => {
   if (searchCity.value) {
@@ -704,6 +726,7 @@ onMounted(() => {
 
 // ====== 工具菜单切换 ======
 const toggleToolMenu = (tool) => {
+  if (mapMode.value === '3d') return // 3D 模式下 OL 专属工具不可用
   activeTool.value = activeTool.value === tool ? '' : tool
 }
 
@@ -729,7 +752,7 @@ const showHeatmap      = ref(false)
 let heatMapLayerInst  = ref(null)
 
 const performHeatmapAnalysis = () => {
-  if (!map) return
+  if (!map || mapMode.value === '3d') return // 3D 模式下热力分析不可用（OL 画布隐藏）
   const pointLayer  = getLayerByTitle('火点分布')
   const predictLayer = getLayerByTitle('预测火险图层')
 
@@ -779,15 +802,57 @@ const performHeatmapAnalysis = () => {
 
     <!-- ======================= 顶栏 ======================= -->
     <header class="gis-topbar">
-      <div class="gis-brand-block">
-        <div class="gis-logo-badge" title="GIS">GIS</div>
-        <div class="gis-title-block">
-          <h1 class="gis-main-title">焰哨多Agent与可视化平台</h1>
-          <p class="gis-sub-title">FlameSentry · Spatial Fire Risk Intelligence · Yunnan</p>
+      <!-- 横幅行：sc-datav TitleWrapper 同构 — 两侧装饰线夹居中标题 -->
+      <div class="gis-banner">
+        <div class="gis-banner-side left">
+          <div class="gis-logo-badge" title="GIS">GIS</div>
+          <div class="topbar-status-col">
+            <!-- DataAgent 数据管线状态 -->
+            <div
+              class="agent-pipeline"
+              :class="dataSource"
+              :title="apiLoading ? 'DataAgent 正在同步后端数据…' : (dataSource === 'api' ? 'DataAgent 从后端 API 拉取数据' : '后端不可用，DataAgent 已降级本地数据')"
+            >
+              <span class="ap-dot"></span>
+              <span class="ap-text">DataAgent · {{ pipelineLabel }}</span>
+            </div>
+            <!-- 高德天气 -->
+            <div class="header-weather">
+              <div class="weather-button-mini" @click.stop="toggleWeather">
+                <i class="iconfont icon-duoyun"></i>
+                <span v-if="weatherInfo && weatherInfo.city">{{ weatherInfo.city }} {{ weatherInfo.temperature }}℃</span>
+                <span v-else>定位天气…</span>
+              </div>
+              <div class="weather-popup" v-if="showWeather && weatherInfo && weatherInfo.city" @click.stop>
+                <div class="weather-details">
+                  <div class="city"><div>{{ weatherInfo.city }}</div><span>{{ weatherInfo.weather }}</span></div>
+                  <div class="info">
+                    <span><i class="iconfont icon-wendu"></i>{{ weatherInfo.temperature }}℃</span>
+                    <span><i class="iconfont icon-fengxiang"></i>{{ weatherInfo.winddirection }}</span>
+                    <span><i class="iconfont icon-shidu"></i>{{ weatherInfo.humidity }}%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="gis-banner-center">
+          <span class="gis-banner-line" aria-hidden="true"></span>
+          <div class="gis-title-block">
+            <h1 class="gis-main-title gis-metal-text">焰哨多Agent与可视化平台</h1>
+            <p class="gis-sub-title">FlameSentry · Spatial Fire Risk Intelligence · Yunnan</p>
+          </div>
+          <span class="gis-banner-line" aria-hidden="true"></span>
+        </div>
+
+        <div class="gis-banner-side right">
+          <div class="header-time"><Clock /></div>
         </div>
       </div>
 
-      <div class="gis-topbar-center">
+      <!-- 控制行：数据模式 / 筛选 / 火险预警 -->
+      <div class="gis-controls">
         <!-- 数据模式切换 -->
         <div class="gis-seg" role="group" aria-label="数据模式">
           <button type="button" class="gis-seg-btn" :class="{ active: currentDataType === 'history' }" @click="toggleDataType('history')">历史火点</button>
@@ -874,39 +939,6 @@ const performHeatmapAnalysis = () => {
         </div>
       </div>
 
-      <div class="gis-topbar-right">
-        <!-- 状态列：DataAgent 管线 + 天气 垂直堆叠（避免挤压左侧按钮） -->
-        <div class="topbar-status-col">
-          <!-- DataAgent 数据管线状态 -->
-          <div
-            class="agent-pipeline"
-            :class="dataSource"
-            :title="apiLoading ? 'DataAgent 正在同步后端数据…' : (dataSource === 'api' ? 'DataAgent 从后端 API 拉取数据' : '后端不可用，DataAgent 已降级本地数据')"
-          >
-            <span class="ap-dot"></span>
-            <span class="ap-text">DataAgent · {{ pipelineLabel }}</span>
-          </div>
-          <!-- 高德天气 -->
-          <div class="header-weather">
-            <div class="weather-button-mini" @click.stop="toggleWeather">
-              <i class="iconfont icon-duoyun"></i>
-              <span v-if="weatherInfo && weatherInfo.city">{{ weatherInfo.city }} {{ weatherInfo.temperature }}℃</span>
-              <span v-else>定位天气…</span>
-            </div>
-            <div class="weather-popup" v-if="showWeather && weatherInfo && weatherInfo.city" @click.stop>
-              <div class="weather-details">
-                <div class="city"><div>{{ weatherInfo.city }}</div><span>{{ weatherInfo.weather }}</span></div>
-                <div class="info">
-                  <span><i class="iconfont icon-wendu"></i>{{ weatherInfo.temperature }}℃</span>
-                  <span><i class="iconfont icon-fengxiang"></i>{{ weatherInfo.winddirection }}</span>
-                  <span><i class="iconfont icon-shidu"></i>{{ weatherInfo.humidity }}%</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-        <div class="header-time"><Clock /></div>
-      </div>
     </header>
 
     <!-- ======================= 主体三栏 ======================= -->
@@ -996,15 +1028,15 @@ const performHeatmapAnalysis = () => {
       <aside class="gis-rail gis-rail-left">
         <section class="gis-panel">
           <header class="gis-panel-head">
-            <span class="gis-panel-kicker">HIST</span>
             <h2 class="gis-panel-title">历史火点危害等级</h2>
+            <span class="gis-panel-kicker">HIST</span>
           </header>
           <div class="gis-panel-body"><LeftFirstChart :fireData="historyFireData" /></div>
         </section>
         <section class="gis-panel">
           <header class="gis-panel-head">
-            <span class="gis-panel-kicker">FREQ</span>
             <h2 class="gis-panel-title">历史火点发生频次</h2>
+            <span class="gis-panel-kicker">FREQ</span>
           </header>
           <div class="gis-panel-body"><LeftSecondChart :fireData="historyFireData" /></div>
         </section>
@@ -1016,7 +1048,18 @@ const performHeatmapAnalysis = () => {
           <span class="gis-corner tl" /><span class="gis-corner tr" />
           <span class="gis-corner bl" /><span class="gis-corner br" />
           <div class="gis-map-inner">
+            <!-- 3D 模式：Three.js 场景（sc-datav 风格：挤出面片 + 扫光 + 飞线 + 光柱） -->
+            <Map3D
+              v-show="mapMode === '3d'"
+              ref="map3dRef"
+              :city-polygons="borderDataJson"
+              :city-risk-data="cityRiskData"
+              :fire-points="displayFireData"
+              @city-click="handleMap3DCityClick"
+            />
+            <!-- 2D 模式：OpenLayers（完整工具链） -->
             <MapModule
+              v-show="mapMode === '2d'"
               ref="mapRef"
               :fireData="currentDataType === 'history' ? displayFireData : { type: 'FeatureCollection', features: [] }"
               :predictData="currentDataType === 'predict' ? displayFireData : { type: 'FeatureCollection', features: [] }"
@@ -1025,6 +1068,11 @@ const performHeatmapAnalysis = () => {
               @map-loaded="handleMapLoaded"
               @cluster-click="handleClusterClick"
             />
+            <!-- 3D/2D 模式切换 -->
+            <div class="map-mode-toggle" role="group" aria-label="地图模式">
+              <button type="button" :class="{ active: mapMode === '3d' }" @click="switchMapMode('3d')">3D</button>
+              <button type="button" :class="{ active: mapMode === '2d' }" @click="switchMapMode('2d')">2D</button>
+            </div>
           </div>
         </div>
         <!-- 底栏工具 -->
@@ -1055,10 +1103,10 @@ const performHeatmapAnalysis = () => {
             <i class="iconfont icon-relitu" :class="{ 'is-on': showHeatmap }"></i>
             <span>{{ showHeatmap ? '关热力' : '热力' }}</span>
           </div>
-          <div class="gis-dock-item" @click="downloadMap(map)">
+          <div class="gis-dock-item" @click="handleDownload">
             <i class="iconfont icon-ico_dituxiazai"></i><span>导出</span>
           </div>
-          <div class="gis-dock-item" title="定位到云南省范围" @click="animateView">
+          <div class="gis-dock-item" title="定位到云南省范围" @click="mapMode === '3d' ? map3dRef?.resetView() : animateView()">
             <i class="iconfont icon-ditu01 gis-dock-icon-fit"></i><span>全省</span>
           </div>
         </div>
@@ -1068,15 +1116,15 @@ const performHeatmapAnalysis = () => {
       <aside class="gis-rail gis-rail-right">
         <section class="gis-panel">
           <header class="gis-panel-head">
-            <span class="gis-panel-kicker">PRED</span>
             <h2 class="gis-panel-title">预测火险等级占比</h2>
+            <span class="gis-panel-kicker">PRED</span>
           </header>
           <div class="gis-panel-body"><RightFirstChart :searchDate="searchDate" :viewMode="predictViewMode" :predictData="predictDataForChart" /></div>
         </section>
         <section class="gis-panel">
           <header class="gis-panel-head">
-            <span class="gis-panel-kicker">DIST</span>
             <h2 class="gis-panel-title">预测火险等级频次分布</h2>
+            <span class="gis-panel-kicker">DIST</span>
           </header>
           <div class="gis-panel-body"><RightSecondChart :searchDate="searchDate" :viewMode="predictViewMode" :predictData="predictDataForChart" /></div>
         </section>
@@ -1142,7 +1190,7 @@ const performHeatmapAnalysis = () => {
   height: 100vh;
   height: 100dvh;
   min-height: 0;
-  background: var(--gis-bg-deep);
+  background: var(--gis-atmo-bg);
   color: var(--gis-text);
   overflow: hidden;
 }
@@ -1157,31 +1205,57 @@ const performHeatmapAnalysis = () => {
     linear-gradient(var(--gis-grid) 1px, transparent 1px),
     linear-gradient(90deg, var(--gis-grid) 1px, transparent 1px);
   background-size: 48px 48px;
-  opacity: 0.55;
+  opacity: 0.4;
 }
 
-/* 顶栏（overflow 可见，便于预警详情以浮层展开而不撑高整栏、挤压下方图表） */
+/* 顶栏（纵向两行：横幅行 + 控制行；overflow 可见，便于预警详情以浮层展开而不撑高整栏） */
 .gis-topbar {
   position: relative;
   z-index: 20;
   flex-shrink: 0;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  min-height: 56px;
-  padding: 8px 20px;
-  border-bottom: 1px solid var(--gis-border);
-  background: linear-gradient(180deg, #0f172a 0%, #020617 100%);
-  box-shadow: 0 1px 0 rgba(34, 211, 238, 0.12);
+  flex-direction: column;
+  border-bottom: 1px solid var(--gis-glass-border);
+  background: var(--gis-bg-header, linear-gradient(180deg, rgba(15, 23, 42, 0.72) 0%, rgba(2, 6, 23, 0.82) 100%));
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  box-shadow: var(--gis-line-glow);
   overflow: visible;
 }
 
-.gis-brand-block {
+/* ====== 横幅行（sc-datav TitleWrapper 同构）：两侧装饰线夹居中标题 ====== */
+.gis-banner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: 58px;
+  padding: 8px 20px 2px;
+}
+
+.gis-banner-side {
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 12px;
-  flex-shrink: 0;
+  min-width: 0;
+}
+
+.gis-banner-side.right {
+  justify-content: flex-end;
+}
+
+.gis-banner-center {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.gis-banner-line {
+  flex: 1 0 48px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--gis-accent-dim, rgba(37, 99, 235, 0.35)), transparent);
 }
 
 .gis-logo-badge {
@@ -1194,41 +1268,50 @@ const performHeatmapAnalysis = () => {
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
-  color: #020617;
-  background: linear-gradient(145deg, #22d3ee, #0891b2);
-  border: 1px solid rgba(34, 211, 238, 0.6);
+  color: var(--gis-on-accent, #020617);
+  background: var(--gis-metal-accent);
+  box-shadow: var(--gis-glow);
+  border: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.6));
   border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .gis-title-block {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
 }
 
 .gis-main-title {
   margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: var(--gis-text);
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  white-space: nowrap;
 }
 
+/* sc-datav 横幅签名：标题下英文小字角标 */
 .gis-sub-title {
   margin: 0;
-  font-size: 11px;
+  font-size: 9px;
   font-family: ui-monospace, "Consolas", monospace;
-  color: var(--gis-text-muted);
-  letter-spacing: 0.02em;
+  color: var(--gis-accent);
+  opacity: 0.75;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.gis-topbar-center {
-  flex: 1;
+/* ====== 控制行：数据模式 / 筛选 / 预警摘要 ====== */
+.gis-controls {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: center;
-  gap: 14px 20px;
+  gap: 10px 18px;
+  padding: 6px 20px 10px;
   min-width: 0;
   overflow: visible;
 }
@@ -1258,7 +1341,7 @@ const performHeatmapAnalysis = () => {
 }
 
 .gis-seg-btn.active {
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   background: var(--gis-accent);
 }
 
@@ -1274,7 +1357,7 @@ const performHeatmapAnalysis = () => {
   align-items: center;
   gap: 6px;
   padding: 4px 10px;
-  background: rgba(15, 23, 42, 0.85);
+  background: var(--gis-glass-solid, rgba(15, 23, 42, 0.85));
   border: 1px solid;
   border-radius: 4px;
   font-size: 11px;
@@ -1339,7 +1422,7 @@ const performHeatmapAnalysis = () => {
   align-items: center;
   gap: 8px;
   padding: 5px 12px;
-  background: rgba(15, 23, 42, 0.9);
+  background: var(--gis-glass-solid, rgba(15, 23, 42, 0.9));
   border: 1px solid;
   border-radius: 4px;
   font-size: 11px;
@@ -1350,7 +1433,7 @@ const performHeatmapAnalysis = () => {
 }
 
 .fire-warning-summary:hover {
-  background: rgba(20, 30, 50, 0.95);
+  background: var(--gis-glass-solid, rgba(20, 30, 50, 0.95));
 }
 
 @keyframes warningPulse {
@@ -1389,8 +1472,10 @@ const performHeatmapAnalysis = () => {
   transform: translateX(-50%);
   width: min(680px, calc(100vw - 24px));
   max-height: min(340px, 42vh);
-  background: rgba(15, 23, 42, 0.98);
-  border: 1px solid var(--gis-border);
+  background: var(--gis-glass-solid);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  box-shadow: var(--gis-glow), 0 12px 40px rgba(0, 0, 0, 0.55);
   border-radius: 4px;
   padding: 10px;
   overflow-y: auto;
@@ -1421,7 +1506,7 @@ const performHeatmapAnalysis = () => {
 }
 
 .fw-region-card:hover {
-  background: rgba(30, 41, 59, 0.8);
+  background: var(--gis-hover-tint, rgba(30, 41, 59, 0.8));
 }
 
 .fw-region-header {
@@ -1442,7 +1527,7 @@ const performHeatmapAnalysis = () => {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 10px;
-  color: #020617;
+  color: #020617; /* 彩色风险芯片（背景为 riskLevel 色阶）两主题下均需深色文字 */
   font-weight: 700;
   white-space: nowrap;
   flex-shrink: 0;
@@ -1464,7 +1549,7 @@ const performHeatmapAnalysis = () => {
   gap: 4px;
 
   .fw-measure-icon {
-    color: #22d3ee;
+    color: var(--gis-accent, #22d3ee);
     flex-shrink: 0;
     margin-top: 1px;
     font-size: 10px;
@@ -1485,19 +1570,12 @@ const performHeatmapAnalysis = () => {
 .gis-date { min-width: 118px; }
 .gis-city { width: 140px; }
 
-.gis-topbar-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  flex-shrink: 0;
-}
-
-/* 状态列：DataAgent 管线 + 天气 垂直堆叠 */
+/* 状态行：DataAgent 管线 + 天气 同行排列（横幅左侧，天气在右） */
 .topbar-status-col {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
 }
 
 /* DataAgent 数据管线状态 */
@@ -1599,7 +1677,7 @@ const performHeatmapAnalysis = () => {
 .vr-title {
   font-size: 13px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
 }
 .vr-model-tag {
   margin-left: auto;
@@ -1615,8 +1693,8 @@ const performHeatmapAnalysis = () => {
 }
 .vr-upload-box :deep(.el-upload-dragger) {
   padding: 10px 6px;
-  background: rgba(14, 165, 233, 0.04);
-  border-color: rgba(56, 189, 248, 0.25);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.04));
+  border-color: var(--gis-accent-soft, rgba(56, 189, 248, 0.25));
 }
 .vu-mini {
   text-align: center;
@@ -1657,7 +1735,7 @@ const performHeatmapAnalysis = () => {
 .vrd-file {
   font-size: 12px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1694,33 +1772,33 @@ const performHeatmapAnalysis = () => {
   margin: 10px 0 6px;
   font-size: 13px;
   font-weight: 700;
-  color: #7dd3fc;
+  color: var(--gis-accent, #7dd3fc);
 }
 .vrd-analysis :deep(p) { margin: 6px 0; }
 .vrd-analysis :deep(ul), .vrd-analysis :deep(ol) { padding-left: 18px; margin: 6px 0; }
 .vrd-analysis :deep(li) { margin: 3px 0; }
-.vrd-analysis :deep(strong) { color: #fbbf24; }
+.vrd-analysis :deep(strong) { color: var(--el-color-warning, #fbbf24); }
 .vrd-analysis :deep(blockquote) {
   margin: 8px 0;
   padding: 4px 10px;
-  border-left: 3px solid #38bdf8;
-  background: rgba(56, 189, 248, 0.06);
-  color: #94a3b8;
+  border-left: 3px solid var(--gis-accent, #38bdf8);
+  background: var(--gis-accent-soft, rgba(56, 189, 248, 0.06));
+  color: var(--gis-text-muted, #94a3b8);
 }
 .vrd-analysis :deep(table) { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 11px; }
 .vrd-analysis :deep(th), .vrd-analysis :deep(td) {
-  border: 1px solid #334155;
+  border: 1px solid var(--gis-border, #334155);
   padding: 4px 8px;
   text-align: left;
 }
-.vrd-analysis :deep(th) { background: rgba(56, 189, 248, 0.08); color: #7dd3fc; }
+.vrd-analysis :deep(th) { background: var(--gis-accent-soft, rgba(56, 189, 248, 0.08)); color: var(--gis-accent, #7dd3fc); }
 .vrd-analysis :deep(code) {
-  background: #1e293b;
+  background: var(--gis-bg-panel-2, #1e293b);
   padding: 1px 5px;
   border-radius: 3px;
   font-family: ui-monospace, "Consolas", monospace;
   font-size: 11px;
-  color: #7dd3fc;
+  color: var(--gis-accent, #7dd3fc);
 }
 /* 历史区 */
 .vr-history {
@@ -1765,7 +1843,7 @@ const performHeatmapAnalysis = () => {
 }
 .vrh-file {
   font-size: 11px;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1809,11 +1887,11 @@ const performHeatmapAnalysis = () => {
 }
 
 .agent-pipeline.api .ap-text {
-  color: #4ade80;
+  color: var(--el-color-success, #4ade80);
 }
 
 .agent-pipeline.local .ap-text {
-  color: #facc15;
+  color: var(--el-color-warning, #facc15);
 }
 
 .header-weather {
@@ -1846,14 +1924,16 @@ const performHeatmapAnalysis = () => {
   .weather-popup {
     position: absolute;
     top: 100%;
-    right: 0;
+    left: 0;
     margin-top: 6px;
     min-width: 220px;
+    white-space: nowrap;
     padding: 12px 14px;
-    background: var(--gis-bg-panel);
-    border: 1px solid var(--gis-border);
+    background: var(--gis-glass-solid);
+    backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+    border: 1px solid var(--gis-glass-border);
     border-radius: 4px;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+    box-shadow: var(--gis-glow), 0 8px 24px rgba(0, 0, 0, 0.45);
     z-index: 40;
 
     .city {
@@ -1912,27 +1992,46 @@ const performHeatmapAnalysis = () => {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  background: var(--gis-bg-panel);
-  border: 1px solid var(--gis-border);
-  border-radius: 2px;
-  box-shadow: inset 0 0 0 1px rgba(34, 211, 238, 0.06);
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
+  overflow: hidden;
 }
 
 .gis-panel-head {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--gis-border);
-  background: linear-gradient(90deg, rgba(8, 145, 178, 0.12), transparent);
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--gis-glass-border);
+  flex-shrink: 0;
 }
 
+/* sc-datav 标题签名：左侧强调竖条 */
+.gis-panel-head::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: var(--gis-accent);
+  box-shadow: var(--gis-glow);
+  flex-shrink: 0;
+}
+
+/* 英文角标居右（sc-datav CardTitle 右缀英文） */
 .gis-panel-kicker {
+  margin-left: auto;
   font-family: ui-monospace, "Consolas", monospace;
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  color: var(--gis-accent);
+  font-size: 9px;
+  font-weight: 400;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--gis-text-muted);
+  opacity: 0.85;
+  white-space: nowrap;
 }
 
 .gis-panel-title {
@@ -1940,6 +2039,7 @@ const performHeatmapAnalysis = () => {
   font-size: 13px;
   font-weight: 600;
   color: var(--gis-text);
+  letter-spacing: 0.03em;
 }
 
 .gis-panel-body {
@@ -1972,18 +2072,57 @@ const performHeatmapAnalysis = () => {
   position: relative;
   flex: 1;
   min-height: 0;
-  border: 1px solid var(--gis-border-strong);
-  border-radius: 2px;
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
   background: #000;
   box-shadow:
-    0 0 0 1px rgba(34, 211, 238, 0.15),
-    0 12px 40px rgba(0, 0, 0, 0.55);
+    inset 0 1px 0 var(--gis-glass-highlight),
+    0 12px 40px rgba(0, 0, 0, 0.35);
 }
 
 .gis-map-inner {
   position: absolute;
   inset: 0;
   overflow: hidden;
+}
+
+/* 3D/2D 模式切换（地图框右上角玻璃胶囊） */
+.map-mode-toggle {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  z-index: 15;
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  background: rgba(6, 18, 33, 0.72);
+  backdrop-filter: blur(8px) saturate(1.2);
+  border: 1px solid rgba(125, 211, 252, 0.28);
+  border-radius: 8px;
+}
+
+.map-mode-toggle button {
+  padding: 3px 12px;
+  font-size: 11px;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  letter-spacing: 0.12em;
+  color: rgba(186, 230, 253, 0.75);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.map-mode-toggle button:hover {
+  color: #e0f2fe;
+}
+
+.map-mode-toggle button.active {
+  color: #04101f;
+  background: var(--gis-accent, #38bdf8);
+  font-weight: 700;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.45);
 }
 
 /* 四角装饰 */
@@ -2012,9 +2151,12 @@ const performHeatmapAnalysis = () => {
   gap: 6px;
   margin-top: 8px;
   padding: 5px 6px;
-  background: var(--gis-bg-panel);
-  border: 1px solid var(--gis-border);
-  border-radius: 2px;
+  background: var(--gis-glass);
+  backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--gis-glass-blur)) saturate(var(--gis-glass-saturate));
+  border: 1px solid var(--gis-glass-border);
+  border-radius: var(--gis-radius-md, 10px);
+  box-shadow: inset 0 1px 0 var(--gis-glass-highlight);
 }
 
 .gis-dock-item {
@@ -2034,7 +2176,7 @@ const performHeatmapAnalysis = () => {
 
 .gis-dock-item:hover {
   color: var(--gis-text);
-  background: rgba(34, 211, 238, 0.08);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.08));
 }
 
 .gis-dock-item .iconfont {
@@ -2110,7 +2252,7 @@ const performHeatmapAnalysis = () => {
   font-size: 11px;
   font-family: ui-monospace, "Consolas", monospace;
   color: var(--gis-text-muted);
-  background: rgba(2, 6, 23, 0.92);
+  background: var(--gis-glass-solid, rgba(2, 6, 23, 0.92));
   border-top: 1px solid var(--gis-border);
 }
 
@@ -2136,13 +2278,13 @@ const performHeatmapAnalysis = () => {
   .el-table {
     --el-table-bg-color: var(--gis-bg-panel) !important;
     --el-table-tr-bg-color: var(--gis-bg-panel) !important;
-    --el-table-header-bg-color: #020617 !important;
-    --el-table-row-hover-bg-color: rgba(34, 211, 238, 0.1) !important;
+    --el-table-header-bg-color: var(--gis-table-header, #020617) !important;
+    --el-table-row-hover-bg-color: var(--gis-hover-tint, rgba(34, 211, 238, 0.1)) !important;
     color: var(--gis-text) !important;
   }
 
   th.el-table__cell {
-    background: #020617 !important;
+    background: var(--gis-table-header, #020617) !important;
     color: var(--gis-accent) !important;
     font-family: ui-monospace, "Consolas", monospace;
     font-size: 12px;
@@ -2150,14 +2292,14 @@ const performHeatmapAnalysis = () => {
   }
 
   td.el-table__cell {
-    background-color: rgba(15, 23, 42, 0.92) !important;
+    background-color: var(--gis-bg-panel-2, rgba(15, 23, 42, 0.92)) !important;
     color: var(--gis-text) !important;
     border-bottom: 1px solid var(--gis-border) !important;
     font-size: 12px;
   }
 
   .el-table__body tr:hover > td.el-table__cell {
-    background-color: rgba(34, 211, 238, 0.08) !important;
+    background-color: var(--gis-hover-tint, rgba(34, 211, 238, 0.08)) !important;
     color: var(--gis-text) !important;
   }
 

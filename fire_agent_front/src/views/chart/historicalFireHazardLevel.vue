@@ -8,7 +8,8 @@ import { FullScreen, ScaleToOriginal } from '@element-plus/icons-vue'
 import { onMounted, ref, nextTick, onUnmounted, computed, watch } from 'vue'
 import * as echarts from 'echarts'
 import { parseGeoData } from '@/utils/parseGeoData'
-import { gisChartPalette } from '@/utils/echartsGisTheme'
+import { chartTokens } from '@/utils/themeTokens'
+import { useThemeStore } from '@/stores/theme'
 
 // 接收 fireData prop（由父组件传入 API 数据或本地数据）
 const props = defineProps({
@@ -17,6 +18,10 @@ const props = defineProps({
     default: null
   }
 })
+
+// 主题 Token：传入 mode 仅为建立响应式依赖，主题切换时重新读取 CSS 变量
+const theme = useThemeStore()
+const tokens = computed(() => chartTokens(theme.mode))
 
 // 当 fireData 变化时重新解析
 const rawGeo = ref(props.fireData ? parseGeoData(props.fireData) : parseGeoData())
@@ -61,23 +66,24 @@ const handleSizeChange = (val) => {
   currentPage.value = 1
 }
 
-// ECharts 配置：环形饼图，高/低置信度两段（computed：数据变化时自动更新）
+// ECharts 配置：环形饼图，高/低置信度两段（computed：数据/主题变化时自动更新）
 const option = computed(() => {
+  const t = tokens.value
   const counts = geoData.value.confidenceCounts || { high: 0, low: 0 }
   return {
   backgroundColor: 'transparent',
   tooltip: {
     trigger: 'item',
-    backgroundColor: gisChartPalette.bgTooltip,
-    borderColor: gisChartPalette.axis,
+    backgroundColor: t.panel,
+    borderColor: t.border,
     borderWidth: 1,
-    textStyle: { color: gisChartPalette.textStrong, fontSize: 12 },
+    textStyle: { color: t.text, fontSize: 12 },
     formatter: '{b}: {c} ({d}%)'
   },
   legend: {
     bottom: '5%',
     left: 'center',
-    textStyle: { color: gisChartPalette.text, fontSize: 11 }
+    textStyle: { color: t.muted, fontSize: 11 }
   },
   series: [{
     name: '火险置信度分布',
@@ -86,7 +92,7 @@ const option = computed(() => {
     avoidLabelOverlap: false,
     itemStyle: {
       borderRadius: 0,
-      borderColor: gisChartPalette.axis,
+      borderColor: t.border,
       borderWidth: 1
     },
     label: {
@@ -98,7 +104,7 @@ const option = computed(() => {
         show: true,
         fontSize: 14,
         fontWeight: 600,
-        color: gisChartPalette.textStrong
+        color: t.text
       }
     },
     labelLine: {
@@ -124,6 +130,7 @@ const initChart = () => {
 // 初始化全屏图（显示外部标签）
 const initMaxChart = () => {
   if (maxChartRef.value) {
+    const t = tokens.value
     if (maxChartInstance) maxChartInstance.dispose()
     maxChartInstance = echarts.init(maxChartRef.value)
     const maxOption = JSON.parse(JSON.stringify(option.value))
@@ -131,19 +138,19 @@ const initMaxChart = () => {
       maxOption.series[0].label = {
         show: true,
         position: 'outside',
-        color: gisChartPalette.textStrong,
+        color: t.text,
         formatter: '{b}: {c} ({d}%)',
         fontSize: 13
       }
       maxOption.series[0].labelLine = {
         show: true,
-        lineStyle: { color: gisChartPalette.axis }
+        lineStyle: { color: t.border }
       }
     }
     maxOption.legend = {
       bottom: '5%',
       left: 'center',
-      textStyle: { color: gisChartPalette.text, fontSize: 13 }
+      textStyle: { color: t.muted, fontSize: 13 }
     }
     maxChartInstance.setOption(maxOption)
   }
@@ -173,6 +180,16 @@ onMounted(() => {
 
 // fireData 变化时刷新图表
 watch(() => props.fireData, () => {
+  nextTick(() => {
+    initChart()
+    if (isMaximized.value) {
+      nextTick(() => initMaxChart())
+    }
+  })
+})
+
+// 主题切换时重建图表
+watch(() => theme.mode, () => {
   nextTick(() => {
     initChart()
     if (isMaximized.value) {
@@ -226,7 +243,7 @@ onUnmounted(() => {
                 stripe
                 border
                 style="width: 100%; height: 100%; position: absolute; top: 0; left: 0;"
-                :header-cell-style="{ background: '#f8fafc', color: '#606266', fontWeight: 'bold' }"
+                :header-cell-style="{ background: 'var(--gis-table-header)', color: 'var(--gis-text-muted)', fontWeight: 'bold' }"
               >
                 <el-table-column prop="acq_date" label="日期" min-width="120" sortable />
                 <el-table-column prop="conf" label="置信度" min-width="100">
@@ -281,11 +298,11 @@ onUnmounted(() => {
     top: 0;
     right: 0;
     cursor: pointer;
-    color: #94a3b8;
+    color: var(--gis-text-muted, #94a3b8);
     z-index: 10;
-    background: #0f172a;
-    border: 1px solid #334155;
-    border-radius: 4px;
+    background: var(--gis-glass-solid);
+    border: 1px solid var(--gis-border);
+    border-radius: var(--gis-radius-xs, 4px);
     width: 24px;
     height: 24px;
     display: flex;
@@ -293,7 +310,8 @@ onUnmounted(() => {
     justify-content: center;
 
     &:hover {
-      background: #1e293b;
+      background: var(--gis-accent-soft);
+      box-shadow: var(--gis-glow);
     }
   }
 
@@ -310,7 +328,7 @@ onUnmounted(() => {
   width: 100vw;
   height: 100vh;
   z-index: 2000;
-  background: #020617;
+  background: var(--gis-atmo-bg);
   padding: 20px;
   display: flex;
   flex-direction: column;
@@ -325,9 +343,10 @@ onUnmounted(() => {
 
     .max-title {
       font-size: 22px;
-      color: #f8fafc;
+      color: var(--gis-text, #f8fafc);
       font-weight: 600;
       letter-spacing: 0.04em;
+      text-shadow: var(--gis-text-glow);
     }
   }
 
@@ -340,9 +359,9 @@ onUnmounted(() => {
     .chart-area-max {
       width: 40%;
       height: 100%;
-      background: #0f172a;
+      background: var(--gis-bg-panel);
       border-radius: 2px;
-      border: 1px solid #334155;
+      border: 1px solid var(--gis-border);
     }
 
     .table-area {

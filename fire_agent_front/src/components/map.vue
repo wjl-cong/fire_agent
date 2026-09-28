@@ -263,7 +263,7 @@ const flyToExtent = (extent) => {
   if (!map || !extent) return
   map.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000, maxZoom: 10 })
 }
-defineExpose({ flyToExtent, highlightCity })
+defineExpose({ flyToExtent, highlightCity, resize: () => map && map.updateSize() })
 
 // ====== 挂载 ======
 onMounted(() => {
@@ -366,7 +366,7 @@ onMounted(() => {
   font-family: ui-monospace, 'Cascadia Code', 'Consolas', monospace;
   font-size: 11px;
   color: var(--gis-text, #f8fafc);
-  background: rgba(15, 23, 42, 0.92);
+  background: var(--gis-glass-solid, rgba(15, 23, 42, 0.92));
   border: 1px solid var(--gis-border, #334155);
   border-radius: 2px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
@@ -378,7 +378,7 @@ onMounted(() => {
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  color: #020617;
+  color: var(--gis-on-accent, #020617);
   background: var(--gis-accent, #22d3ee);
   border-radius: 2px;
 }

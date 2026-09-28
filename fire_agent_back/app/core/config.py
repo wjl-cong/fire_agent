@@ -8,7 +8,7 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     # 项目基本信息
     PROJECT_NAME: str = "焰哨多Agent与可视化平台"
-    VERSION: str = "1.0.0"
+    VERSION: str = "1.0.1"
 
     # 报告署名信息（自动追加到生成的每份分析报告末尾）
     REPORT_FOOTER: str = (
@@ -69,6 +69,28 @@ class Settings(BaseSettings):
     KB_CHUNK_SIZE: int = 500
     KB_CHUNK_OVERLAP: int = 50
     KB_TOP_K: int = 5
+
+    # Rerank 精排（阿里 DashScope text-rerank，使用 LLM_API_KEY；失败自动降级 RRF 融合原序）
+    RERANK_ENABLED: bool = True
+    RERANK_MODEL: str = "qwen3-rerank"
+
+    # Agent 高级参数（P1）
+    AGENT_REQUIRE_APPROVAL: bool = True  # 报告生成后需人工审批（HITL）才定稿
+
+    # P2：全链路流式输出（报告/RAG 回答逐字推送；关闭后回退整段返回）
+    LLM_STREAM_ENABLED: bool = True
+
+    # P2：用户偏好长期记忆（PostgresStore，ReportAgent 注入；关闭后不读写偏好）
+    PREFERENCES_ENABLED: bool = True
+
+    # P2：Langfuse 私有化观测（需自建 Langfuse 服务；False 或未配密钥时降级纯日志）
+    LANGFUSE_ENABLED: bool = False
+    LANGFUSE_HOST: str = "http://localhost:3000"
+    LANGFUSE_PUBLIC_KEY: str = ""
+    LANGFUSE_SECRET_KEY: str = ""
+
+    # P2：MCP 工具化数据源（高德天气只读 server；未安装依赖或调用失败自动降级跳过）
+    MCP_ENABLED: bool = True
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

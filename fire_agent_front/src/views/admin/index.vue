@@ -691,8 +691,8 @@ onUnmounted(() => {
         <div class="overview-card">
           <div class="oc-label">大模型</div>
           <div class="oc-value">
-            <el-icon v-if="status.llm_available" style="color:#4ade80"><CircleCheck /></el-icon>
-            <el-icon v-else style="color:#94a3b8"><CircleClose /></el-icon>
+            <el-icon v-if="status.llm_available" style="color: var(--el-color-success, #4ade80)"><CircleCheck /></el-icon>
+            <el-icon v-else style="color: var(--gis-text-muted, #94a3b8)"><CircleClose /></el-icon>
             {{ status.llm_available ? status.llm_model : '未配置' }}
           </div>
         </div>
@@ -995,7 +995,7 @@ onUnmounted(() => {
             </el-table-column>
             <el-table-column label="说明" min-width="170" show-overflow-tooltip>
               <template #default="{ row }">
-                <span style="font-size: 12px; color: #94a3b8">{{ quotaRemark(row) }}</span>
+                <span style="font-size: 12px; color: var(--gis-text-muted, #94a3b8)">{{ quotaRemark(row) }}</span>
               </template>
             </el-table-column>
             <el-table-column label="操作" width="90" fixed="right" align="center">
@@ -1211,6 +1211,16 @@ onUnmounted(() => {
           <label>最大并行 Agent 数</label>
           <el-input-number v-model="agentForm.max_agents" :min="1" :max="10" />
         </div>
+        <div class="form-item">
+          <label>报告人工审批（HITL）</label>
+          <el-switch v-model="agentForm.require_approval" active-text="开启" inactive-text="关闭" />
+          <div class="form-tip">开启后 Agent 报告生成并通过质量评审后，需人工审批（通过 / 编辑 / 驳回）才定稿归档</div>
+        </div>
+        <div class="form-item">
+          <label>全链路流式输出</label>
+          <el-switch v-model="agentForm.llm_stream_enabled" active-text="开启" inactive-text="关闭" />
+          <div class="form-tip">P2#18：报告与 RAG 回答逐字流式推送（打字机效果）；关闭后回退整段返回</div>
+        </div>
       </div>
 
       <div class="action-row">
@@ -1219,11 +1229,11 @@ onUnmounted(() => {
 
       <div class="panel-sub">Agent 图谱说明</div>
       <div class="graph-note">
-        <p><b>Orchestrator</b>（LangGraph 编排）→ 拆解任务 →</p>
-        <p>&nbsp;&nbsp;├─ <b>DataAgent</b>：查数据库（历史火点/预测）</p>
-        <p>&nbsp;&nbsp;├─ <b>GisAgent</b>：空间分析（聚类/缓冲区）</p>
-        <p>&nbsp;&nbsp;├─ <b>RagAgent</b>：知识库 RAG 检索</p>
-        <p>&nbsp;&nbsp;└─ <b>ReportAgent</b>：LLM 生成报告</p>
+        <p><b>Orchestrator</b>（LangGraph 编排）→ 拆解任务（plan 驱动路由）→</p>
+        <p>&nbsp;&nbsp;├─ <b>DataAgent</b>：查数据库（历史火点/预测双源）→ <b>GisAgent</b>：空间分析</p>
+        <p>&nbsp;&nbsp;├─ <b>RagAgent</b>：知识库 RAG 检索（Adaptive + Rerank）</p>
+        <p>&nbsp;&nbsp;└─ 汇合 → <b>ReportAgent</b>：生成报告 → <b>Reviewer</b>：质量评审（不通过退回重写，最多 2 轮）</p>
+        <p>→ 人工审批闸口（HITL，可配置）：通过 / 编辑 / 驳回 → 报告定稿归档</p>
       </div>
     </div>
 
@@ -1321,13 +1331,13 @@ onUnmounted(() => {
   height: 100%;
   display: flex;
   flex-direction: column;
-  background: #0a0f1e;
-  color: #f8fafc;
+  background: var(--gis-atmo-bg);
+  color: var(--gis-text, #f8fafc);
   overflow: hidden;
 }
 .admin-header {
   padding: 18px 24px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
   flex-shrink: 0;
 }
 .admin-title {
@@ -1338,13 +1348,13 @@ onUnmounted(() => {
 .admin-subtitle {
   margin: 4px 0 0;
   font-size: 12px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .admin-tabs {
   display: flex;
   gap: 4px;
   padding: 10px 24px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
   flex-shrink: 0;
 }
 .atab {
@@ -1353,7 +1363,7 @@ onUnmounted(() => {
   gap: 6px;
   padding: 8px 16px;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   background: transparent;
   border: none;
   border-radius: 6px;
@@ -1361,12 +1371,13 @@ onUnmounted(() => {
   transition: all 0.15s;
 }
 .atab:hover {
-  color: #e2e8f0;
-  background: #1e293b;
+  color: var(--gis-text, #f8fafc);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.08));
 }
 .atab.active {
-  color: #020617;
-  background: #0ea5e9;
+  color: var(--gis-on-accent, #020617);
+  background: var(--gis-metal-accent);
+  box-shadow: var(--gis-glow);
   font-weight: 600;
 }
 .admin-panel {
@@ -1380,21 +1391,21 @@ onUnmounted(() => {
   gap: 8px;
   font-size: 15px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   margin-bottom: 16px;
 }
 .panel-sub {
   font-size: 13px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   margin: 24px 0 12px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
 }
 .block-title {
   font-size: 13px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   margin: 24px 0 12px;
 }
 
@@ -1404,14 +1415,14 @@ onUnmounted(() => {
   gap: 12px;
 }
 .overview-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   padding: 16px;
 }
 .oc-label {
   font-size: 11px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   margin-bottom: 8px;
 }
 .oc-value {
@@ -1420,7 +1431,7 @@ onUnmounted(() => {
   gap: 6px;
   font-size: 15px;
   font-weight: 600;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
 }
 
 .agent-grid {
@@ -1429,19 +1440,19 @@ onUnmounted(() => {
   gap: 12px;
 }
 .agent-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   padding: 14px;
 }
 .agent-name {
   font-size: 13px;
   font-weight: 600;
-  color: #f8fafc;
+  color: var(--gis-text, #f8fafc);
 }
 .agent-framework {
   font-size: 11px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   margin: 6px 0;
 }
 .agent-status {
@@ -1453,8 +1464,8 @@ onUnmounted(() => {
 }
 
 .ds-card {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   padding: 8px 16px;
 }
@@ -1462,7 +1473,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   padding: 10px 0;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
 }
 .ds-row:last-child {
   border-bottom: none;
@@ -1470,12 +1481,12 @@ onUnmounted(() => {
 .ds-label {
   width: 120px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   flex-shrink: 0;
 }
 .ds-value {
   font-size: 12px;
-  color: #0ea5e9;
+  color: var(--gis-accent, #0ea5e9);
   font-family: ui-monospace, "Consolas", monospace;
 }
 .ds-test {
@@ -1493,8 +1504,14 @@ onUnmounted(() => {
 .form-item label {
   display: block;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   margin-bottom: 6px;
+}
+.form-tip {
+  font-size: 11px;
+  color: var(--gis-text-muted, #64748b);
+  line-height: 1.5;
+  margin-top: 6px;
 }
 .action-row {
   display: flex;
@@ -1508,8 +1525,8 @@ onUnmounted(() => {
   margin-left: 4px;
 }
 .action-row :deep(.el-button--primary) {
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  background: var(--gis-accent);
+  border-color: var(--gis-accent);
 }
 .test-result {
   display: flex;
@@ -1529,12 +1546,12 @@ onUnmounted(() => {
 }
 
 .graph-note {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   padding: 16px;
   font-size: 13px;
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
   line-height: 1.9;
   font-family: ui-monospace, "Consolas", monospace;
   white-space: pre-wrap;
@@ -1550,14 +1567,14 @@ onUnmounted(() => {
   gap: 16px;
   margin-bottom: 20px;
   padding: 14px 18px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
 }
 .provider-label {
   font-size: 13px;
   font-weight: 600;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   flex-shrink: 0;
 }
 .provider-options {
@@ -1570,21 +1587,21 @@ onUnmounted(() => {
   gap: 6px;
   padding: 8px 18px;
   font-size: 13px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   background: transparent;
-  border: 1px solid #1e293b;
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 6px;
   cursor: pointer;
   transition: all 0.15s;
 }
 .popt:hover {
-  color: #e2e8f0;
-  background: #1e293b;
+  color: var(--gis-text, #f8fafc);
+  background: var(--gis-hover-tint, rgba(34, 211, 238, 0.08));
 }
 .popt.active {
-  color: #020617;
-  background: #0ea5e9;
-  border-color: #0ea5e9;
+  color: var(--gis-on-accent, #020617);
+  background: var(--gis-accent);
+  border-color: var(--gis-accent);
   font-weight: 600;
 }
 
@@ -1598,30 +1615,30 @@ onUnmounted(() => {
   padding: 8px 12px;
   font-size: 11px;
   line-height: 1.7;
-  color: #94a3b8;
-  background: rgba(14, 165, 233, 0.05);
-  border: 1px dashed rgba(14, 165, 233, 0.25);
+  color: var(--gis-text-muted, #94a3b8);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.05));
+  border: 1px dashed var(--gis-accent-soft, rgba(34, 211, 238, 0.25));
   border-radius: 4px;
 }
 .ollama-hint code {
-  background: rgba(30, 41, 59, 0.8);
+  background: var(--gis-table-header, rgba(30, 41, 59, 0.8));
   padding: 1px 5px;
   border-radius: 3px;
   font-family: ui-monospace, "Consolas", monospace;
-  color: #7dd3fc;
+  color: var(--gis-accent, #7dd3fc);
 }
 /* ====== 百炼账号免费额度快照 ====== */
 .quota-login-card {
   margin-top: 12px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   padding: 14px 16px;
 }
 .quota-summary {
   margin-left: 14px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
 }
 
 /* ====== 百炼模型 ====== */
@@ -1634,28 +1651,28 @@ onUnmounted(() => {
 .free-models-hint {
   font-size: 11px;
   line-height: 1.8;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   padding: 8px 12px;
-  background: rgba(14, 165, 233, 0.05);
-  border: 1px dashed rgba(14, 165, 233, 0.25);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.05));
+  border: 1px dashed var(--gis-accent-soft, rgba(34, 211, 238, 0.25));
   border-radius: 4px;
 }
 .free-models-hint code {
-  background: rgba(30, 41, 59, 0.8);
+  background: var(--gis-table-header, rgba(30, 41, 59, 0.8));
   padding: 1px 5px;
   border-radius: 3px;
   font-family: ui-monospace, "Consolas", monospace;
-  color: #7dd3fc;
+  color: var(--gis-accent, #7dd3fc);
 }
 .free-models-hint a {
-  color: #38bdf8;
+  color: var(--gis-accent, #38bdf8);
 }
 /* ====== 密钥使用概况卡片 ====== */
 .key-info-card {
   margin: 10px 0;
   padding: 12px 16px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 6px;
 }
 .ki-row {
@@ -1670,16 +1687,16 @@ onUnmounted(() => {
 }
 .ki-label {
   font-size: 11px;
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
 }
 .ki-value {
   font-size: 13px;
-  color: #e2e8f0;
+  color: var(--gis-text, #f8fafc);
   font-weight: 600;
 }
 .ki-value.mono {
   font-family: ui-monospace, "Consolas", monospace;
-  color: #7dd3fc;
+  color: var(--gis-accent, #7dd3fc);
 }
 .ki-links {
   display: flex;
@@ -1688,12 +1705,12 @@ onUnmounted(() => {
   gap: 12px;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #1e293b;
+  border-top: 1px dashed var(--gis-border, #1e293b);
   flex-wrap: wrap;
 }
 .ki-note {
   font-size: 11px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   line-height: 1.6;
   flex: 1;
   min-width: 260px;
@@ -1712,9 +1729,9 @@ onUnmounted(() => {
 .cat-tab {
   padding: 5px 14px;
   font-size: 12px;
-  color: #94a3b8;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  color: var(--gis-text-muted, #94a3b8);
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 14px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1723,24 +1740,24 @@ onUnmounted(() => {
   gap: 6px;
 }
 .cat-tab:hover {
-  color: #38bdf8;
-  border-color: rgba(56, 189, 248, 0.4);
+  color: var(--gis-accent, #38bdf8);
+  border-color: var(--gis-accent-soft, rgba(56, 189, 248, 0.4));
 }
 .cat-tab.active {
-  color: #fff;
-  background: rgba(56, 189, 248, 0.15);
-  border-color: #38bdf8;
+  color: var(--gis-accent, #fff);
+  background: var(--gis-accent-soft, rgba(56, 189, 248, 0.15));
+  border-color: var(--gis-accent, #38bdf8);
 }
 .cat-count {
   font-size: 10px;
   padding: 0 6px;
   border-radius: 8px;
   background: rgba(148, 163, 184, 0.15);
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
 }
 .cat-tab.active .cat-count {
-  background: rgba(56, 189, 248, 0.25);
-  color: #7dd3fc;
+  background: var(--gis-accent-soft, rgba(56, 189, 248, 0.25));
+  color: var(--gis-accent, #7dd3fc);
 }
 .qwen3-8-section .panel-sub {
   margin-top: 16px;
@@ -1751,13 +1768,13 @@ onUnmounted(() => {
   gap: 8px;
   margin-top: 12px;
   padding: 10px 14px;
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 6px;
 }
 .qs-label {
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
 }
 .qs-badge {
   font-size: 11px;
@@ -1766,12 +1783,12 @@ onUnmounted(() => {
   border-radius: 10px;
 }
 .qs-ok {
-  color: #4ade80;
+  color: var(--el-color-success, #4ade80);
   background: rgba(74, 222, 128, 0.12);
   border: 1px solid rgba(74, 222, 128, 0.3);
 }
 .qs-warn {
-  color: #facc15;
+  color: var(--el-color-warning, #facc15);
   background: rgba(250, 204, 21, 0.12);
   border: 1px solid rgba(250, 204, 21, 0.3);
 }
@@ -1781,14 +1798,14 @@ onUnmounted(() => {
   border: 1px solid rgba(239, 68, 68, 0.3);
 }
 .qs-gray {
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
 
 .log-list {
-  background: #0a0f1e;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-deep);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   font-family: ui-monospace, "Consolas", monospace;
   overflow-y: auto;
@@ -1797,7 +1814,7 @@ onUnmounted(() => {
 .log-empty {
   padding: 40px;
   text-align: center;
-  color: #475569;
+  color: var(--gis-text-muted, #475569);
   font-size: 12px;
 }
 .log-item {
@@ -1805,14 +1822,14 @@ onUnmounted(() => {
   align-items: center;
   gap: 10px;
   padding: 8px 14px;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
   font-size: 12px;
 }
 .log-item:last-child {
   border-bottom: none;
 }
 .log-time {
-  color: #64748b;
+  color: var(--gis-text-muted, #64748b);
   flex-shrink: 0;
   min-width: 150px;
 }
@@ -1825,11 +1842,11 @@ onUnmounted(() => {
   font-size: 10px;
 }
 .level-info {
-  color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.12);
+  color: var(--gis-accent, #0ea5e9);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.12));
 }
 .level-warn {
-  color: #facc15;
+  color: var(--el-color-warning, #facc15);
   background: rgba(250, 204, 21, 0.12);
 }
 .level-error {
@@ -1837,19 +1854,19 @@ onUnmounted(() => {
   background: rgba(239, 68, 68, 0.12);
 }
 .log-source {
-  color: #4ade80;
+  color: var(--el-color-success, #4ade80);
   flex-shrink: 0;
   min-width: 80px;
 }
 .log-msg {
-  color: #cbd5e1;
+  color: var(--el-text-color-regular, #cbd5e1);
   flex: 1;
 }
 
 /* 用户管理 */
 .user-table-wrap {
-  background: #0f172a;
-  border: 1px solid #1e293b;
+  background: var(--gis-bg-panel, #0f172a);
+  border: 1px solid var(--gis-border, #1e293b);
   border-radius: 8px;
   overflow-x: auto;
 }
@@ -1862,31 +1879,31 @@ onUnmounted(() => {
   text-align: left;
   padding: 10px 14px;
   font-size: 12px;
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   font-weight: 600;
-  border-bottom: 1px solid #1e293b;
-  background: rgba(30, 41, 59, 0.4);
+  border-bottom: 1px solid var(--gis-border, #1e293b);
+  background: var(--gis-table-header, rgba(30, 41, 59, 0.4));
   white-space: nowrap;
 }
 .user-table td {
   padding: 10px 14px;
-  border-bottom: 1px solid #1e293b;
-  color: #cbd5e1;
+  border-bottom: 1px solid var(--gis-border, #1e293b);
+  color: var(--el-text-color-regular, #cbd5e1);
   white-space: nowrap;
 }
 .user-table tr:last-child td {
   border-bottom: none;
 }
 .uname {
-  color: #f8fafc;
+  color: var(--gis-text, #f8fafc);
   font-weight: 600;
 }
 .self-tag {
   margin-left: 8px;
   font-size: 10px;
-  color: #0ea5e9;
-  background: rgba(14, 165, 233, 0.12);
-  border: 1px solid rgba(14, 165, 233, 0.3);
+  color: var(--gis-accent, #0ea5e9);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.12));
+  border: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.3));
   padding: 1px 8px;
   border-radius: 8px;
 }
@@ -1896,12 +1913,12 @@ onUnmounted(() => {
   border-radius: 10px;
 }
 .role-admin {
-  color: #facc15;
+  color: var(--el-color-warning, #facc15);
   background: rgba(250, 204, 21, 0.12);
   border: 1px solid rgba(250, 204, 21, 0.3);
 }
 .role-user {
-  color: #94a3b8;
+  color: var(--gis-text-muted, #94a3b8);
   background: rgba(148, 163, 184, 0.12);
   border: 1px solid rgba(148, 163, 184, 0.3);
 }
@@ -1910,12 +1927,12 @@ onUnmounted(() => {
   padding: 12px 16px;
   font-size: 12px;
   line-height: 1.8;
-  color: #94a3b8;
-  background: rgba(14, 165, 233, 0.06);
-  border: 1px solid rgba(14, 165, 233, 0.2);
+  color: var(--gis-text-muted, #94a3b8);
+  background: var(--gis-accent-soft, rgba(34, 211, 238, 0.06));
+  border: 1px solid var(--gis-accent-soft, rgba(34, 211, 238, 0.2));
   border-radius: 8px;
 }
 .perm-note b {
-  color: #0ea5e9;
+  color: var(--gis-accent, #0ea5e9);
 }
 </style>

@@ -14,8 +14,12 @@ import '@/style/gis-theme.css'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import router from './router'
+import { applyTheme } from '@/stores/theme'
 
 export const app = createApp(App)
+
+// 主题：挂载前先应用已保存的主题类，避免浅色默认主题出现深色闪烁
+applyTheme(localStorage.getItem('fire_agent_theme') === 'dark' ? 'dark' : 'light')
 
 app.use(createPinia())
 app.use(router)

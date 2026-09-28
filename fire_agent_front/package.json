@@ -1,6 +1,6 @@
 {
   "name": "ol-disaster",
-  "version": "0.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
     "ol": "^10.4.0",
     "pinia": "^3.0.1",
     "scss": "^0.2.4",
+    "three": "^0.186.1",
     "vue": "^3.5.13",
     "vue-router": "^4.5.0",
     "webgl-heatmap": "^0.2.3"
