@@ -112,7 +112,7 @@ def _stream_report(prompt: str, task_id: int):
     buf: list[str] = []
     result = None
     try:
-        for chunk in stream_llm(prompt, temperature=0.4, max_tokens=4000):
+        for chunk in stream_llm(prompt, temperature=0.4, max_tokens=4000, enable_thinking=False):
             ctype = chunk.get("type")
             if ctype == "delta":
                 buf.append(chunk.get("text", ""))
@@ -585,7 +585,8 @@ def _make_nodes(db_session, user_id=None, is_admin=False, task_id=None):
                     if res is not None and not (res.text or "").strip():
                         res = None  # 流式 0 字符（思考型模型 content 为空等）→ 必须兜底重试
                 if res is None:
-                    res = invoke_llm(prompt, temperature=0.4, max_tokens=4000)
+                    res = invoke_llm(prompt, temperature=0.4, max_tokens=4000,
+                                     enable_thinking=False)
                 if res is not None and (res.text or "").strip():
                     report = res.text
                     audit = {"llm_provider": res.provider, "llm_model": res.model,

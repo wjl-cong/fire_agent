@@ -191,15 +191,20 @@ def list_provider_models(provider: str | None = None) -> list[str]:
 # ===================== 阿里云 / 通用 OpenAI 兼容 =====================
 
 def _get_aliyun_llm(**kwargs) -> ChatOpenAI | None:
-    """阿里百炼 LLM 实例"""
+    """阿里百炼 LLM 实例（enable_thinking=False 可关闭思考型模型的 reasoning——
+    长思考会吃满 max_tokens 导致正文 content 为空，报告等长文输出必须关闭）"""
     if not settings.LLM_API_KEY:
         return None
+    extra_body = None
+    if kwargs.get("enable_thinking") is not None:
+        extra_body = {"enable_thinking": bool(kwargs["enable_thinking"])}
     return ChatOpenAI(
         model=kwargs.get("model", settings.LLM_MODEL),
         api_key=settings.LLM_API_KEY,
         base_url=settings.LLM_API_BASE or None,
         temperature=kwargs.get("temperature", 0.1),
         max_tokens=kwargs.get("max_tokens", 2048),
+        extra_body=extra_body,
     )
 
 

@@ -169,11 +169,13 @@ def invoke_llm(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model: str | None = None,
+    enable_thinking: bool | None = None,
 ) -> LLMResult | None:
     """
     统一 LLM 文本调用入口。
 
     成功返回 LLMResult；所有 Provider 均失败返回 None（调用方自行走规则兜底）。
+    enable_thinking=False：关闭思考型模型的 reasoning（防长思考吃满 max_tokens 导致正文为空）。
     """
     active = settings.ACTIVE_LLM_PROVIDER or "aliyun"
     kwargs = {}
@@ -183,6 +185,8 @@ def invoke_llm(
         kwargs["max_tokens"] = max_tokens
     if model is not None:
         kwargs["model"] = model
+    if enable_thinking is not None:
+        kwargs["enable_thinking"] = enable_thinking
 
     for provider in _provider_chain():
         breaker = _breaker(provider)
@@ -289,6 +293,7 @@ def stream_llm(
     temperature: float | None = None,
     max_tokens: int | None = None,
     model: str | None = None,
+    enable_thinking: bool | None = None,
 ):
     """统一 LLM 流式文本生成入口（P2#18，与 invoke_llm 同级的流式通道）。
 
@@ -300,6 +305,8 @@ def stream_llm(
     复用 invoke_llm 的 Provider 降级链 + 熔断器 + 重试；差别在于：仅在尚未产出
     任何内容前才允许重试/换 Provider（半截内容无法跨通道续写），已产出的 delta
     是否丢弃重试由调用方决定。
+    enable_thinking=False：关闭思考型模型的 reasoning（同 invoke_llm，防长思考
+    吃满 max_tokens 导致正文为空）。
     """
     active = settings.ACTIVE_LLM_PROVIDER or "aliyun"
     kwargs = {}
@@ -309,6 +316,8 @@ def stream_llm(
         kwargs["max_tokens"] = max_tokens
     if model is not None:
         kwargs["model"] = model
+    if enable_thinking is not None:
+        kwargs["enable_thinking"] = enable_thinking
 
     for provider in _provider_chain():
         breaker = _breaker(provider)

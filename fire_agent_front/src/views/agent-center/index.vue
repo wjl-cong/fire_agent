@@ -82,9 +82,20 @@ const taskHistory = ref([])
 
 // 任务历史持久化（localStorage，按用户隔离，避免多账号同浏览器串数据）
 const HISTORY_KEY = () => `agent_task_history_${(auth.user && auth.user.username) || 'guest'}`
+// 同一问题只保留最新一条：重跑/驳回重写不堆积历史（后端仍保留全部任务，报告中心按次各成新报告）
+const dedupeHistory = (list) => {
+  const seen = new Set()
+  return (list || []).filter(t => {
+    const key = ((t && t.query) || '').trim()
+    if (!key) return true
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
 const loadHistory = () => {
   try {
-    taskHistory.value = JSON.parse(localStorage.getItem(HISTORY_KEY()) || '[]')
+    taskHistory.value = dedupeHistory(JSON.parse(localStorage.getItem(HISTORY_KEY()) || '[]'))
   } catch {
     taskHistory.value = []
   }
@@ -142,24 +153,30 @@ const finishRun = () => {
 
 // 历史入列（SSE report 事件与断线兜底共用；流式增量不写入历史）
 const pushHistoryItem = (d, q) => {
-  taskHistory.value.unshift({
-    id: d.id || Date.now(),
-    reportId: d.report_id || null,
-    query: q,
-    status: d.status,
-    llm_used: !!d.llm_used,
-    llm_provider: d.llm_provider || null,
-    llm_model: d.llm_model || null,
-    time: d.created_at || new Date().toLocaleString(),
-    result: {
+  const itemId = d.id || Date.now()
+  const key = (q || '').trim()
+  taskHistory.value = [
+    {
+      id: itemId,
+      reportId: d.report_id || null,
+      query: q,
       status: d.status,
-      steps: d.steps || [],
-      report: d.report || '',
       llm_used: !!d.llm_used,
       llm_provider: d.llm_provider || null,
       llm_model: d.llm_model || null,
+      time: d.created_at || new Date().toLocaleString(),
+      result: {
+        status: d.status,
+        steps: d.steps || [],
+        report: d.report || '',
+        llm_used: !!d.llm_used,
+        llm_provider: d.llm_provider || null,
+        llm_model: d.llm_model || null,
+      },
     },
-  })
+    // 同一任务（驳回重写后再次落定）或同一问题只保留最新一条，避免历史堆积
+    ...taskHistory.value.filter(t => t.id !== itemId && (t.query || '').trim() !== key),
+  ]
   saveHistory()
 }
 
@@ -428,7 +445,8 @@ const syncHistoryFromApi = async () => {
     const json = await res.json()
     if (json.code === 200 && Array.isArray(json.data)) {
       const local = taskHistory.value
-      taskHistory.value = json.data.map(t => {
+      // /tasks 已按时间倒序返回；每问题只保留最新一条（去重后仍是"最新在前"）
+      taskHistory.value = dedupeHistory(json.data.map(t => {
         // 同一查询且同一天执行的本地记录保留完整结果（含步骤）
         const match = local.find(l => l.query === t.query && t.created_at && l.time && l.time.startsWith(t.created_at.slice(0, 10)))
         return {
@@ -442,7 +460,7 @@ const syncHistoryFromApi = async () => {
           result: match ? match.result : null,
           reportId: t.report_id || null,
         }
-      })
+      }))
     }
   } catch {
     /* 静默 */
