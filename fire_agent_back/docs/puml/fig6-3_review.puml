@@ -1,0 +1,48 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-3 报告评审循环流程图
+
+start
+:报告智能体产出 Markdown 分析报告;
+partition 硬性护栏检查（不依赖模型） {
+  if (字数不少于下限?) then (是)
+  else (否)
+    :判定不通过\n（问题：篇幅不足）;
+  endif
+  if (必备章节齐全?) then (是)
+  else (否)
+    :判定不通过\n（问题：章节缺失）;
+  endif
+  if (引用了真实查询数据?) then (是)
+  else (否)
+    :判定不通过\n（问题：缺少数据引用）;
+  endif
+}
+if (硬性护栏全部通过?) then (否)
+  :生成驳回意见;
+else (是)
+  :低温度模型评审\n（结构与内容质量审查）;
+  if (模型评审通过?) then (是)
+    :进入人工审批环节;
+    stop
+  else (否)
+    :汇总模型评审意见;
+  endif
+endif
+if (重写轮次 < 上限?) then (是)
+  :将问题清单与修改建议\n注入重写提示词;
+  :报告智能体重写报告;
+else (否)
+  :强制放行并标注评审状态;
+  :进入人工审批环节;
+  stop
+endif
+@enduml

@@ -1,0 +1,40 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam rectangle {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+skinparam database {
+  BorderColor #333333
+  BackgroundColor #F5F5F5
+}
+title 图 2-2 检索增强生成（RAG）基本流程图
+
+rectangle "离线索引" as idx #F5F5F5 {
+  rectangle "文档解析\n（含扫描件识别）" as parse
+  rectangle "文本切分" as chunk
+  rectangle "向量化" as embed
+  database "向量库 / 分片库" as store
+  parse -down-> chunk
+  chunk -down-> embed
+  embed -down-> store
+}
+
+rectangle "在线问答" as qa #F5F5F5 {
+  rectangle "用户问题" as q
+  rectangle "混合检索\n（向量 + 关键词）" as retrieve
+  rectangle "重排序精排" as rerank
+  rectangle "提示词构造\n（问题 + 命中片段）" as prompt
+  rectangle "大语言模型生成回答\n（引用来源编号）" as gen
+  q -down-> retrieve
+  retrieve -down-> rerank
+  rerank -down-> prompt
+  prompt -down-> gen
+}
+
+store -right-> retrieve : Top-K 命中分片
+@enduml

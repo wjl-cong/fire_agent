@@ -1,0 +1,37 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantBackgroundColor #FFFFFF
+}
+title 图 6-5 实时进度推送（SSE）时序图
+
+participant "前端页面" as fe
+participant "进度流接口" as sse
+database "业务数据库" as db
+participant "增量通道" as ch
+participant "后台工作线程" as wk
+
+fe -> sse : 建立事件流连接（附令牌）
+sse -> sse : 校验令牌，注册订阅
+loop 任务执行期间
+  wk -> db : 节点开始，预写运行中步骤
+  wk -> db : 节点结束，写入终态与输出载荷
+  wk -> ch : 报告增量文本推送
+  sse -> db : 周期轮询（约 0.6 秒）\n刷新会话读取新增步骤
+  sse --> fe : 事件：步骤更新 / 报告增量 / 审批请求
+end
+alt 连接中断后重连
+  fe -> sse : 携带最后步骤序号重连
+  sse -> db : 按序号重放缺失步骤
+end
+wk -> db : 报告定稿落库
+sse --> fe : 终态事件（完整报告）
+sse -> sse : 注销订阅，关闭连接
+@enduml

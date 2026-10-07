@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # 高德地图 Key
     AMAP_KEY: str = ""
 
-    # 活跃 LLM 提供商（aliyun | amd | ollama）
+    # 活跃 LLM 提供商（aliyun | amd | ollama | longcat）
     ACTIVE_LLM_PROVIDER: str = "aliyun"
 
     # 模型 API — 阿里百炼（兼容 OpenAI 格式）
@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # 模型 API — 本地 Ollama（兼容 OpenAI 格式，无需 API Key）
     OLLAMA_API_BASE: str = "http://localhost:11434/v1"
     OLLAMA_MODEL: str = "qwen2.5:7b"
+
+    # 模型 API — LongCat（兼容 OpenAI 格式，仅 LLM）
+    LONGCAT_API_KEY: str = ""
+    LONGCAT_API_BASE: str = "https://api.longcat.chat/openai"
+    LONGCAT_MODEL: str = "LongCat-2.5-Preview"
 
     # Qwen3.8-Flash-Next 可用时间窗口（空表示不限）
     QWEN3_8_FLASH_START: str = ""
@@ -91,6 +96,14 @@ class Settings(BaseSettings):
 
     # P2：MCP 工具化数据源（高德天气只读 server；未安装依赖或调用失败自动降级跳过）
     MCP_ENABLED: bool = True
+
+    # AgentGauntlet 红队评测故障注入（W1；默认关闭零影响，仅评测时由评测进程以环境变量开启）
+    GAUNTLET_CHAOS: bool = False
+    GAUNTLET_FAULTS_PATH: str = ""
+    GAUNTLET_SEED: int = 42
+    # AgentGauntlet 攻击轮（W2）：system prompt 哨兵串——非空时注入报告生成提示词，
+    # 供评测端 LEAKED_PROMPT 判定；评测完成后置空即恢复原状
+    GAUNTLET_SYS_CANARY: str = ""
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
 

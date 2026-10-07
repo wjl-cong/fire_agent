@@ -1,0 +1,308 @@
+# FlameSentry · Smart Forest-Fire Early-Warning & Multi-Agent Collaboration Platform — Frontend (fire_agent_front)
+
+> **Current version**: v1.0.1 (on top of the v1.0.0 baseline: 3D digital-twin dashboard / light-dark themes / Agent SSE streaming progress & HITL approval / streaming RAG QA / profile page, etc. See [9. Version History](#9-version-history))
+> This is the frontend of the "FlameSentry · Smart Forest-Fire Early-Warning & Multi-Agent Collaboration Platform" (practical display name: **焰哨多Agent与可视化平台**), built on **Vue 3 + Vite + OpenLayers + Three.js + ECharts + Element Plus**.
+> Companion backend: [fire_agent_back](https://gitee.com/wjl2004/fire_agent_back) (FastAPI + PostgreSQL/PostGIS + LangChain/LangGraph)
+> The complete system design document is in the backend repo: 整体实现.md.
+> **Online demo**: https://wjl2004.ffuf.cn/
+> **GitHub repo**: https://github.com/wjl-cong/fire_agent (⭐ Star welcome!)
+
+---
+
+## Table of Contents
+
+1. [Project Overview](#1-project-overview)
+2. [Tech Stack](#2-tech-stack)
+3. [Project Structure](#3-project-structure)
+4. [Page Features in Detail](#4-page-features-in-detail)
+5. [Environment Requirements](#5-environment-requirements)
+6. [Quick Start](#6-quick-start)
+7. [Build & Deployment](#7-build--deployment)
+8. [FAQ](#8-faq)
+9. [Version History](#9-version-history)
+
+---
+
+## 1. Project Overview
+
+The frontend is an SPA application with a **front-end/back-end separated architecture**, with 7 page routes covering the whole forest-fire governance workflow:
+
+| Page | Route | Access | Core Capabilities |
+|---|---|---|---|
+| Login/Register | `/login` | Public | JWT login, auto-login after registration, redirect return |
+| Dashboard | `/dashboard` | Login | Historical fire points / predicted risk / boundaries / heatmap / clustering / measurement / export PNG + 4 charts; **left-side AI fire recognition sidebar** (vision model recognition + history review + MD rendering + voice playback) |
+| Smart Query | `/smart-query` | Login | Natural language → LLM parsing → summary/table/chart/map four-dimensional linkage; **🎤 voice input auto-query + 🔊 summary playback** |
+| Knowledge Base | `/knowledge-base` | Login | Document upload management + RAG QA + cited sources display; **🎤 voice question + 🔊 answer playback** |
+| Agent Center | `/agent-center` | Login | 5-Agent pipeline visualization + task history replay (steps fetched from backend); **🎤 voice task submission + 🔊 report playback** |
+| Report Center | `/report-center` | Login | Report list/detail/export Markdown/HTML/print PDF; **🔊 report voice playback** |
+| System Admin | `/admin` | **admin only** | Overview/Data sources/Model access (incl. vision & speech models + Bailian free-quota catalog)/Agent params/Logs/User management |
+
+**Design highlights**:
+
+- **Agent flavor throughout the system**: the dashboard shows DataAgent data-pipeline status and the VisionAgent fire-recognition sidebar, the query page shows the QueryAgent parsing process, the knowledge base shows the RagAgent retrieval process, and the report center marks the ReportAgent as the source;
+- **Full-chain voice interaction**: `utils/speech.js` uniformly wraps recording (Web Audio API captures PCM → pure-frontend WAV encoding) and playback (TTS audio stream), five AI pages support 🎤 input with auto-execution and 🔊 one-click result playback;
+- **Degradation fallback**: if the dashboard backend API fails, it automatically falls back to local JSON, so core pages never go blank;
+- **Unified interaction**: the left-side panel "click title to expand/collapse" is consistent across query/knowledge-base/agent/report/fire-recognition; delete buttons are always visible with `@click.stop` to prevent mis-triggers;
+- **Unified risk levels**: the 5-level fire-risk colors/labels are managed centrally by `utils/riskLevel.js`, exactly matching the backend classification.
+
+---
+
+## 2. Tech Stack
+
+| Category | Technology | Version | Purpose |
+|---|---|---|---|
+| Framework | Vue 3 (Composition API) | ^3.5.13 | All pages use `<script setup>` |
+| Router | Vue Router | ^4.5.0 | 8 routes + login/admin guards |
+| State management | Pinia | ^3.0.1 | auth store + theme store (token/user/theme persistence) |
+| UI component library | Element Plus | ^2.9.6 | Tables/pagination/upload/messages/confirm dialogs (Chinese locale + auto import) |
+| Map engine | OpenLayers | ^10.4.0 | Tianditu basemap, fire-point clustering, heatmap, boundaries, draw & measure |
+| 3D engine | **Three.js** | ^0.186.1 | Home 3D digital-twin dashboard (extruded plates/fly-lines/cluster bars/CSS2D labels) |
+| Spatial computation | Turf.js | ^7.2.0 | Draw area / distance measurement |
+| Charts | ECharts | ^5.6.0 | 4 dashboard charts + smart query result charts (GIS dark theme) |
+| Heat rendering | webgl-heatmap | ^0.2.3 | Fire-point density heatmap |
+| Build tool | Vite + Sass | ^6.1.0 | dev server + `/api` proxy to backend 8000 |
+| Helper libraries | file-saver / moment | — | Map export, time handling |
+| Code quality | ESLint 9 + oxlint | dev | Dual lint (`npm run lint`) |
+
+---
+
+## 3. Project Structure
+
+```
+fire_agent_front/
+├── vite.config.js              ← Vite config: /api proxy to http://localhost:8000,
+│                                   Element Plus auto-import plugin, @ alias to src
+├── package.json                ← Dependencies and scripts
+└── src/
+    ├── main.js                 ← Entry: registers Pinia / Router / Element Plus Chinese locale,
+    │                              OpenLayers Canvas willReadFrequently patch; theme applied pre-paint
+    ├── App.vue                 ← Lightweight route container
+    ├── router/index.js         ← 8 routes + global guards (login auth + admin permission)
+    ├── stores/auth.js          ← Pinia auth state (login/register/logout, localStorage persistence)
+    ├── stores/theme.js         ← Pinia theme state (light/dark toggle, html.dark + localStorage)
+    ├── layout/MainLayout.vue   ← 48px narrow sidebar (iconfont icons + adminOnly menu filtering
+    │                              + ☾/☀ theme toggle + avatar entry to the profile page)
+    ├── api/dashboard.js        ← Dashboard API wrapper (fetchHistoryFires/fetchPredictRisks/fetchSummary)
+    ├── utils/
+    │   ├── authFetch.js        ← Unified authenticated fetch: auto-attaches Bearer, 401 logout → login
+    │   ├── speech.js           ← Voice interaction: Web Audio API recording PCM→WAV encoding (ASR)
+    │   │                          + TTS playback (speakText/speakState/startRecord)
+    │   ├── markdown.js         ← Safe Markdown rendering (headings/tables/code/lists/quotes, HTML-escaped)
+    │   ├── riskLevel.js        ← 5-level fire-risk colors/labels (matches backend classification)
+    │   ├── themeTokens.js      ← Read theme CSS variables from JS (ECharts/3D live re-coloring)
+    │   ├── parseGeoData.js     ← GeoJSON parsing
+    │   ├── draw.js / computed.js / downLoad.js / timeWeather.js / setPointStyle.js
+    │   └── echartsGisTheme.js  ← ECharts GIS dark theme
+    ├── components/
+    │   ├── map.vue             ← Core OpenLayers 2D map component (Tianditu basemap/cluster/heat/boundary/highlight layers)
+    │   ├── Map3D.vue           ← Three.js 3D digital-twin dashboard (sc-datav style: extruded plates/sweep shader/
+    │   │                          Bézier flight lines/screen-space cluster bars/CSS2D labels/light-dark themes)
+    │   ├── clock.vue           ← Real-time clock
+    │   ├── SystemCapabilities.vue ← System capabilities panel (GET /agent/capabilities, Agent Center right column)
+    │   └── chart/              ← 4 dashboard chart components
+    │       ├── historicalFireHazardLevel.vue    ← Historical fire hazard level distribution
+    │       ├── historicalFireFrequency.vue      ← Historical fire point frequency
+    │       ├── proportionFireRiskWarnings.vue   ← Predicted fire risk warning share
+    │       └── distributionFireRiskWarning.vue  ← Predicted fire risk distribution
+    ├── views/
+    │   ├── login/index.vue         ← Login/Register dual-mode
+    │   ├── dashboard/index.vue     ← Dashboard (~2,310 lines, incl. 2D/3D switch)
+    │   ├── smart-query/index.vue   ← Smart query
+    │   ├── knowledge-base/index.vue← Knowledge base RAG (streaming QA)
+    │   ├── agent-center/index.vue  ← Agent collaboration center (SSE streaming + HITL approval)
+    │   ├── report-center/index.vue ← Report center
+    │   ├── profile/index.vue       ← Profile (change email/password)
+    │   └── admin/index.vue         ← System admin (6 tabs, admin only)
+    ├── style/
+    │   ├── gis-theme.css       ← Light/dark themes (CSS-variable tokens, html.dark switch)
+    │   └── common.css
+    └── assets/                 ← Local fallback data: Yunnan_fire.json / Yunnan_border.json /
+                                    predict_2025_2026_daily.json / predict_2025_2026_month.json
+```
+
+---
+
+## 4. Page Features in Detail
+
+### 4.1 Login / Register Page (`/login`)
+
+- Login/register dual-mode one-click switch, form validation (username ≥2 chars, password ≥6 chars, passwords match)
+- Auto-login after login/registration (JWT stored in localStorage), returns to the original page via `?redirect=`
+- Dark glassmorphism card UI
+
+### 4.2 Dashboard (`/dashboard`)
+
+- **Data flow**: `Promise.all` concurrently requests historical fire points (5,000 max) / daily predictions / monthly predictions; any failure auto-falls back to local JSON
+- **2D map** (OpenLayers): Tianditu basemap, fire-point clustering (distance=40, click opens el-drawer detail), webgl heatmap, 16-prefecture boundaries, polygon/line drawing + Turf.js measurement, PNG export
+- **3D digital-twin map** (`Map3D.vue`, Three.js, v1.0.1): 2D/3D one-click switch from the right dock — extruded prefecture plates (top faces colored by risk level + side sweep-light shader), Kunming→prefecture Bézier flight lines, rotating base ring, rising light pillars, CSS2D prefecture labels; screen-space fire-point cluster bars (world coords → screen pixels → 40px greedy clustering, wheel-zoom rebuilt with 120ms debounce; bar height = fire count, cyan→amber→red gradient, zero-fire prefectures keep base bars for full 16-region coverage); 2.2s dive-in animation, hover lift, `city-click` linked with 2D; light-dark theme palettes
+- **Charts** (ECharts): historical fire hazard level distribution / historical fire point frequency / predicted risk warning share / predicted risk distribution
+- **Top bar**: real-time clock, AMap weather API, daily/monthly view switch, **DataAgent data-pipeline status** (vertically stacked with weather, so it doesn't squeeze the left buttons)
+- **Left-side AI fire recognition sidebar** (collapsible 34px ↔ 310px): drag-and-drop upload a fire scene photo → vision model (qwen-vl) recognition → result **Markdown rendering** (fire determination/scene description/severity/handling suggestions) → 🔊 voice playback; recognition history list with click-to-review (authenticated image stream) and per-record delete
+
+### 4.3 Smart Query (`/smart-query`)
+
+- Natural-language input (textarea + Ctrl+Enter + 4 example tags) + **🎤 voice input** (recording → ASR → auto-execute query)
+- **QueryAgent parsing panel**: intent / structured parameter chips / LLM·keyword parsing-mode badge / parsing explanation
+- **Four-dimensional result linkage**: summary card (🔊 voice playback) / table (dynamic-column el-table) / charts (bar·line·pie) / map (GeoJSON risk-graded colors + auto-fit zoom)
+- **Query history sidebar**: expand/collapse (48px ↔ 220px), persisted to backend (same-text auto-dedup), user-isolated, per-record delete, LLM/keyword label
+
+### 4.4 Knowledge Base RAG (`/knowledge-base`)
+
+- **Left document panel** (56px ↔ 280px collapsible): drag/click upload (PDF/TXT/MD), status badges, per-record delete
+- **Right QA area**: example questions, 🎤 voice question (auto-submits after recognition), answer card (LLM/keyword badge + 🔊 voice playback), **cited-source list** (relevance score + click to expand full text)
+- **Streaming QA (v1.0.1)**: prefers `POST /rag/ask/stream` (SSE typewriter incremental rendering, sources attached when the stream ends); automatically falls back to the non-streaming endpoint if streaming fails or is unsupported
+
+### 4.5 Agent Collaboration Center (`/agent-center`)
+
+- Task input (textarea + Ctrl+Enter + 4 example tasks) + 🎤 voice input (auto-executes the task after recognition)
+- **Agent system status bar**: readiness dots for 5 Agents
+- **5-step pipeline visualization**: decompose task → query data → analyze GIS → retrieve knowledge → generate report; steps light up one by one (completed green / running yellow pulse / pending gray)
+- **SSE node-level streaming progress (v1.0.1)**: `EventSource` subscribes to `GET /agent/tasks/{id}/stream?token=<JWT>` for real-time node progress and `report_delta` report increments (typewriter rendering); auto-fallback to fetching task detail on SSE disconnect
+- **HITL approval (v1.0.1)**: after the report draft is generated the task pauses (report not yet in the report center); the right-column approval card shows the draft and supports **approve & finalize / finalize edited draft / reject with comments**; after approval the task resumes and the finalized report lands in the report center
+- **System capabilities panel (v1.0.1)**: right-column `SystemCapabilities.vue` renders the backend `GET /agent/capabilities` list (multi-provider/circuit breaker/Rerank/MCP/memory, etc.)
+- **Execution-process summary** + Markdown report rendering (🔊 voice playback) + ReportAgent badge
+- **Task history sidebar** (56px ↔ 260px): persisted to backend, click to replay, per-record delete; **replay chain**: local cache → `GET /agent/tasks/{task_id}` fetches persisted execution steps (agent_task_steps) and the associated report → "Agent execution process" panel fully restored
+
+### 4.6 Report Center (`/report-center`)
+
+- Left list panel (60px ↔ 340px collapsible): type filter (all/daily/weekly/monthly/special) + pagination + type badge/tag/summary + per-record delete
+- **Model-name badge (v1.0.1)**: list and detail header/meta bar show the generating model — `llm_model` first (e.g. qwen-max), falling back to the provider name "阿里百炼 / AMD GPU Cloud" when absent
+- **Soft delete (v1.0.1)**: user self-delete only hides it from that user (admin still sees it); admin delete is a global soft delete
+- Right detail: Markdown content rendering + **🔊 voice playback (summary + content) / export Markdown / export HTML / print as PDF / delete**
+- ReportAgent badge marks reports auto-generated by the Agent
+
+### 4.7 System Admin (`/admin`, admin only)
+
+| Tab | Features |
+|---|---|
+| Overview | Version, database status, LLM availability, 5-Agent status cards (null-value fallback) |
+| Data Sources | Database URL (masked) + connection test |
+| Model Access | LLM provider switch (aliyun/amd/ollama), API Key (masked `sk-***xxx`), **vision/ASR/TTS model config**, save writes .env with hot reload, LLM real invoke test; **Bailian free-quota model catalog**: 5 category tabs (LLM/vision/multimodal/speech/embedding), real-time availability validation, sorted by "free first → longer validity → currently in use → verified", one-click 「Use」 switch for all model types; **AMD live model catalog (v1.0.1)**: real-time fetch of the AMD official `tokenfactory` catalog (text/vision category tabs); **Bailian quota snapshot (v1.0.1)**: billing-doc free-quota catalog (5 categories) + account quota snapshot table (remaining/expiry/status, sorted by expiry) |
+| Agent Params | Orchestration temperature / report temperature / max Agents |
+| System Logs | Ring buffer of 200 entries (Agent tasks/config changes/user management/connection tests), **30s polling auto-refresh (v1.0.1)** |
+| User Management | User list, role change (self-change blocked), delete user (self-delete blocked) |
+
+### 4.8 Profile (`/profile`, v1.0.1)
+
+- Entered from the top-bar user avatar; change email and change password (old-password check, new-password confirmation check)
+
+---
+
+## 5. Environment Requirements
+
+| Component | Requirement |
+|---|---|
+| Node.js | **18+** (Node 20 LTS recommended) |
+| npm | 9+ (bundled with Node) |
+| Backend service | `fire_agent_back` running at `http://localhost:8000` (see startup notes below) |
+| Browser | Modern Chrome / Edge |
+
+---
+
+## 6. Quick Start
+
+### 6.1 Start the Backend (prerequisite)
+
+The frontend depends on the backend API, so start the backend service first:
+
+```bash
+cd fire_agent_back
+conda activate fire_agent_back          # or your Python environment
+uvicorn app.main:app --reload --port 8000
+```
+
+Detailed backend startup steps are in the backend repo README: https://gitee.com/wjl2004/fire_agent_back
+
+### 6.2 Start the Frontend
+
+```bash
+# 1. Enter the frontend directory
+cd fire_agent_front
+
+# 2. Install dependencies (first time)
+npm install
+
+# 3. Start the dev server
+npm run dev
+```
+
+After starting, visit: **http://localhost:5173**
+
+- Default admin account: `admin / 123456` (seed-created by the backend on first start)
+- Unauthenticated users are redirected to `/login`
+
+### 6.3 Proxy Configuration
+
+In development, the Vite proxy handles CORS (`vite.config.js`):
+
+```js
+server: {
+  proxy: {
+    '/api': {
+      target: 'http://localhost:8000',   // backend address, change as needed
+      changeOrigin: true
+    }
+  }
+}
+```
+
+If the backend is not on port 8000, modify this and restart `npm run dev`.
+
+### 6.4 Default Admin Account and Page Access Mapping
+
+| Account | Role | Accessible Pages |
+|---|---|---|
+| admin | admin | All 7 pages (incl. System Admin) |
+| Registered account | user | 6 pages except System Admin |
+
+---
+
+## 7. Build & Deployment
+
+```bash
+# Production build (outputs dist/)
+npm run build
+
+# Preview the build locally
+npm run preview
+
+# Code check
+npm run lint
+```
+
+Production deployment: after `npm run build`, deploy the `dist/` directory to Nginx and reverse-proxy `/api` to the backend:
+
+```nginx
+server {
+    listen 80;
+    root /path/to/fire_agent_front/dist;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;   # SPA route fallback
+    }
+
+    location /api {
+        proxy_pass http://localhost:8000;   # backend service
+        proxy_set_header Host $host;
+    }
+}
+```
+
+---
+
+## 8. FAQ
+
+| Problem | Solution |
+|---|---|
+| Blank page / data not showing | Confirm the backend is running (http://localhost:8000/health returns ok); check the browser console for errors; Ctrl+Shift+R hard refresh to clear cache |
+| 🎤 Voice input not responding | Confirm the browser microphone permission is granted (lock icon in the address bar → Microphone → Allow); make sure you use Chrome/Edge and access the page via localhost (getUserMedia requires a secure context) |
+| 🔊 Voice playback fails | The backend needs the Bailian LLM_API_KEY configured (TTS always goes through Bailian); check the backend console for TTS call errors |
+| Redirected back to login after login | Check the backend JWT_SECRET config; clear localStorage and log in again |
+| Map basemap not showing | When the Tianditu token expires, replace the token (the dashboard can still render with local boundary data) |
+| Port already in use | `npm run dev -- --port 5174` to change the port, and update the backend CORS_ORIGINS accordingly |
+| Slow npm install | Use a domestic mirror: `npm config set registry https://registry.npmmirror.com` |
+
+---
+
+*Developer: wjl (19136220923@163.com) · Frontend source: https://gitee.com/wjl2004/fire_agent_front · Backend source: https://gitee.com/wjl2004/fire_agent_back*

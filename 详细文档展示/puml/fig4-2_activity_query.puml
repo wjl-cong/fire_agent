@@ -1,0 +1,44 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 4-2 自然语言智能查询活动图
+
+|用户|
+start
+:输入自然语言查询语句;
+:（或语音输入，经识别转为文本）;
+|系统|
+:接收查询文本;
+if (大语言模型可用?) then (是)
+  :大语言模型解析意图\n（输出结构化意图与参数）;
+  if (解析结果有效?) then (是)
+    :采用模型解析结果;
+  else (否)
+    :降级为关键词规则解析;
+  endif
+else (否)
+  :关键词规则解析\n（州市全称映射、季节到月份映射）;
+endif
+:得到意图类型与查询参数;
+switch (意图类型?)
+case (历史火点查询)
+  :按日期区间检索历史火点\n并按火辐射功率排序;
+case (预测火险查询)
+  :按年份 / 月份检索预测火险\n并按风险评分排序;
+case (数据汇总)
+  :统计各州市火点数量\n输出排名;
+endswitch
+:生成四维结果\n（摘要 / 表格 / 图表 / 空间数据）;
+:查询历史按用户与文本去重落库;
+|用户|
+:查看摘要、表格、图表与地图结果;
+:（可选）语音播报查询摘要;
+stop
+@enduml

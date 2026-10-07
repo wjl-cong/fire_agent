@@ -1,0 +1,27 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-9 全链路语音交互处理流程图
+
+|#EFEFEF|录音识别链路|
+start
+:用户点击麦克风按钮，授权录音;
+:采集脉冲编码调制音频数据;
+:声道合并、量化为 16 位整型\n并降采样至 16 千赫兹;
+:构建波形文件头，编码为 WAV 格式;
+:上传语音识别服务转为文本;
+:识别文本回填输入框并自动执行;
+|#EFEFEF|语音播报链路|
+:用户点击播报按钮;
+:结果文本预处理\n（去除标题符号与表格线）;
+:调用语音合成服务生成音频流;
+:创建音频对象播放\n（全局互斥，防止重叠播报）;
+stop
+@enduml

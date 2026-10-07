@@ -1,0 +1,48 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantBackgroundColor #FFFFFF
+  ActorBorderColor #333333
+}
+title 图 4-3 多智能体分析任务交互时序图（需求分析）
+
+actor 用户 as u
+participant "Agent 协作中心" as fe
+participant "任务接口" as api
+participant "编排智能体" as orch
+participant "数据智能体" as da
+participant "知识检索智能体" as ra
+participant "报告智能体" as rep
+database "数据库" as db
+
+u -> fe : 输入分析任务描述
+fe -> api : 创建任务
+api -> db : 写入任务记录
+api --> fe : 立即返回任务标识
+api -> orch : 后台线程执行
+fe -> api : 订阅实时进度流
+par 数据查询与知识检索并行
+  orch -> da : 双数据源查询
+  da -> db : 读取火点与火险数据
+  orch -> ra : 知识库混合检索
+  ra -> db : 读取命中分片
+end
+orch -> orch : 空间分析（网格聚类）
+orch -> rep : 汇聚结果生成报告
+rep --> orch : Markdown 报告
+api -> db : 步骤与报告落库
+api --> fe : 推送步骤与报告增量
+u -> fe : 人工审批（通过 / 编辑 / 驳回）
+fe -> api : 提交审批决策
+api -> orch : 恢复执行（注入决策）
+api -> db : 报告定稿落库
+api --> fe : 推送终态
+fe --> u : 展示完整报告
+@enduml

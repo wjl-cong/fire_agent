@@ -1,0 +1,4 @@
+interface:
+  display_name: "Graduation Thesis Writer"
+  short_description: "Polished Markdown thesis from real code"
+  default_prompt: "Use this skill to audit my project code, reference thesis PDFs, screenshots, and docs, then produce a truthful, template-aligned, Word-convertible Markdown undergraduate thesis with PlantUML-MCP-first UML diagrams plus draw.io/manual-layout fallbacks, concise figure/table captions, and reviewer-style language polishing."

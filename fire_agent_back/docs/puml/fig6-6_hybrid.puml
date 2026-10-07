@@ -1,0 +1,38 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-6 知识库混合检索与重排序流程图
+
+start
+:接收用户问题;
+partition 候选召回 {
+  :中文分词与停用词过滤;
+  fork
+    :向量通道\n问题向量与分片向量余弦相似度;
+  fork again
+    :关键词通道\n分片命中计数（二元词优先加权）;
+  end fork
+  :加权融合并归一化得分;
+}
+if (重排序服务可用?) then (是)
+  :重排序模型精排\n（对候选分片按相关性重排）;
+else (否)
+  :降级为倒数排序融合\n（保留多通道原序）;
+endif
+:取前 K 个分片作为上下文;
+if (命中不足且为复杂问题?) then (是)
+  :模型改写查询（不超过 3 轮）\n后重新检索;
+else (否)
+endif
+:构造提示词（问题 + 命中分片编号）;
+:模型生成回答，要求引用来源编号;
+:回答与引用来源返回前端展示;
+stop
+@enduml

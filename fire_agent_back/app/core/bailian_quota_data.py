@@ -1,20 +1,21 @@
 """
-百炼账号免费额度数据（静态内置快照，2026-09-02 从控制台同步）
+百炼账号免费额度数据（静态内置快照，2026-10-02 从控制台同步）
 
 每条: {model, category, quota, expire, status}
   - model:    模型 Code
   - category: text(语言) / vision(视觉) / multimodal(全模态) / embedding(向量) / audio(语音)
   - quota:    免费额度剩余量（剩X/共Y）
-  - expire:   过期时间
+  - expire:   过期时间（2099/01/01 = 每月1日额度重置 · 长期有效）
   - status:   状态（已开启）
 
 控制台账号额度为登录态数据、无公开 API，按用户要求改为静态内置；
 额度变动时直接更新本文件即可。
-统计: 语言 14 / 视觉 11 / 全模态 0 / 向量 3 / 语音 61，共 89 条。
+统计: 语言 12 / 视觉 5 / 全模态 3 / 向量 3 / 语音 67，共 90 条。
 """
 
 _T = "text"
 _V = "vision"
+_MM = "multimodal"
 _E = "embedding"
 _A = "audio"
 
@@ -26,41 +27,37 @@ def _rows(category, items):
 
 _M = "剩1,000,000/共1,000,000"
 
-# ===== 语言模型（14 个） =====
+# ===== 语言模型（12 个） =====
 _TEXT_ROWS = _rows(_T, [
     ("qwen3.8-27b",                 _M, "2026/11/18"),
     ("qwen3.7-flash-2026-07-15",    _M, "2026/10/23"),
+    ("qwen3.8-flash",               "剩928,170/共1,000,000",  "2026/11/25"),
     ("kimi-k3",                     _M, "2026/11/18"),
-    ("qwen3.8-max-0902",            _M, "2026/12/01"),
-    ("qwen3.5-ocr",                 _M, "2026/09/14"),
-    ("qwen3.7-flash",               _M, "2026/10/23"),
-    ("qwen3.7-max-2026-06-08",      "剩994,576/共1,000,000", "2026/09/08"),
-    ("qwen3.8-flash",               _M, "2026/11/25"),
     ("deepseek-v4-flash-0731",      _M, "2026/10/31"),
-    ("glm-5.2",                     _M, "2026/09/15"),
-    ("kimi-k2.7-code",              _M, "2026/09/14"),
+    ("qwen3.8-max-0902",            _M, "2026/12/01"),
+    ("deepseek-v4.1-flash",         "剩881,500/共1,000,000",  "2026/12/13"),
+    ("glm-5.3",                     _M, "2026/11/23"),
     ("deepseek-v4-pro-0813",        _M, "2026/11/13"),
     ("qwen3.8-2.4t-a95b",           _M, "2026/11/12"),
-    ("qwen3.8-max",                 _M, "2026/11/01"),
+    ("qwen3.8-max",                 "剩992,720/共1,000,000",  "2026/11/01"),
+    ("qwen3.7-flash",               "剩195,080/共1,000,000",  "2026/10/23"),
 ])
 
-# ===== 视觉模型（11 个） =====
+# ===== 视觉模型（5 个） =====
 _VISION_ROWS = _rows(_V, [
-    ("wan2.7-t2v-2026-06-12",          "剩50/共50",   "2026/09/30"),
-    ("qwen-image-3.0",                 "剩10/共10",   "2026/11/03"),
-    ("happyhorse-1.1-r2v",             "剩10/共10",   "2026/09/21"),
-    ("wan2.7-r2v-2026-06-12",          "剩50/共50",   "2026/09/30"),
-    ("happyhorse-1.1-t2v",             "剩10/共10",   "2026/09/21"),
-    ("wan3.0-video",                   "剩30/共30",   "2026/11/05"),
-    ("qwen-image-3.0-pro",             "剩10/共10",   "2026/11/03"),
-    ("qwen-mt-image-2.0",              "剩100/共100", "2026/11/27"),
-    ("happyhorse-1.1-i2v",             "剩10/共10",   "2026/09/21"),
-    ("qwen-image-2.0-pro-2026-06-22",  "剩100/共100", "2026/09/23"),
-    ("wan3.0-video-prime",             "剩30/共30",   "2026/11/21"),
+    ("qwen-image-3.0",      "剩5/共10",    "2026/11/03"),
+    ("wan3.0-video",        "剩30/共30",   "2026/11/05"),
+    ("qwen-image-3.0-pro",  "剩10/共10",   "2026/11/03"),
+    ("qwen-mt-image-2.0",   "剩100/共100", "2026/11/27"),
+    ("wan3.0-video-prime",  "剩30/共30",   "2026/11/21"),
 ])
 
-# ===== 全模态模型（0 个） =====
-_MULTIMODAL_ROWS: list = []
+# ===== 全模态模型（3 个） =====
+_MULTIMODAL_ROWS = _rows(_MM, [
+    ("qwen-mt-uni",                 _M, "2026/12/15"),
+    ("qwen3.8-omni-flash",          "剩985,620/共1,000,000", "2026/12/17"),
+    ("qwen3.8-omni-flash-realtime", _M, "2026/12/21"),
+])
 
 # ===== 向量模型（3 个） =====
 _EMBEDDING_ROWS = _rows(_E, [
@@ -69,18 +66,33 @@ _EMBEDDING_ROWS = _rows(_E, [
     ("qwen3.7-text-embedding",       _M, "2026/10/13"),
 ])
 
-# ===== 语音模型（61 个） =====
+# ===== 语音模型（67 个） =====
 _SAMBERT = ("剩30,000/共30,000", "2099/01/01")
 _PARAFORMER = ("剩36,000/共36,000", "2099/01/01")
+_COSYVOICE = ("剩10,000/共10,000", "2099/01/01")
 
 _AUDIO_ROWS = _rows(_A, [
+    # — 限期额度 —
+    ("qwen-audio-3.0-tts-plus",                "剩10,000/共10,000", "2026/10/12"),
+    ("qwen-audio-3.0-tts-flash",               "剩10,000/共10,000", "2026/10/12"),
+    ("qwen-audio-3.0-asr-flash-streaming",     "剩36,000/共36,000", "2026/10/27"),
+    ("qwen-audio-3.0-asr-flash",               "剩36,000/共36,000", "2026/10/27"),
+    ("qwen-audio-3.0-asr-flash-filetrans",     "剩36,000/共36,000", "2026/10/27"),
+    ("qwen3-asr-flash",                        "剩35,980/共36,000", "2026/11/24"),
+    ("qwen3.8-livetranslate-flash-realtime",   _M, "2026/12/16"),
+    ("qwen-audio-3.1-asr-flash-streaming",     _M, "2026/12/21"),
+    ("qwen-audio-3.1-asr-flash-filetrans",     _M, "2026/12/21"),
+    ("qwen-audio-3.1-tts-next",                _M, "2026/12/21"),
+    ("qwen-audio-3.1-asr-flash-message",       _M, "2026/12/21"),
+    ("qwen-audio-3.1-asr-flash",               _M, "2026/12/21"),
+    ("qwen-audio-3.1-tts-flash",               _M, "2026/12/21"),
+    # — 每月1日额度重置 · 长期有效 —
     ("sambert-zhide-v1",                    *_SAMBERT),
     ("paraformer-v2",                       *_PARAFORMER),
     ("paraformer-v1",                       *_PARAFORMER),
     ("sambert-zhida-v1",                    *_SAMBERT),
     ("sambert-zhishu-v1",                   *_SAMBERT),
     ("sambert-zhiyue-v1",                   *_SAMBERT),
-    ("qwen-audio-3.0-asr-flash-streaming",  *_PARAFORMER[:1], "2026/10/27"),
     ("sambert-eva-v1",                      *_SAMBERT),
     ("paraformer-realtime-8k-v2",           *_PARAFORMER),
     ("paraformer-realtime-8k-v1",           *_PARAFORMER),
@@ -96,12 +108,9 @@ _AUDIO_ROWS = _rows(_A, [
     ("sambert-perla-v1",                    *_SAMBERT),
     ("sambert-zhihao-v1",                   *_SAMBERT),
     ("sambert-zhilun-v1",                   *_SAMBERT),
-    ("qwen-audio-3.0-tts-plus",             "剩10,000/共10,000", "2026/10/12"),
     ("sambert-zhichu-v1",                   *_SAMBERT),
-    ("qwen-audio-3.0-asr-flash",            *_PARAFORMER[:1], "2026/10/27"),
     ("sambert-zhimao-v1",                   *_SAMBERT),
     ("sambert-zhigui-v1",                   *_SAMBERT),
-    ("qwen3-asr-flash",                     "剩35,975/共36,000", "2026/11/24"),
     ("sambert-zhinan-v1",                   *_SAMBERT),
     ("sambert-zhixiao-v1",                  *_SAMBERT),
     ("sambert-zhimo-v1",                    *_SAMBERT),
@@ -113,12 +122,10 @@ _AUDIO_ROWS = _rows(_A, [
     ("paraformer-8k-v1",                    *_PARAFORMER),
     ("sambert-zhiru-v1",                    *_SAMBERT),
     ("paraformer-8k-v2",                    *_PARAFORMER),
-    ("qwen-audio-3.0-tts-flash",            "剩10,000/共10,000", "2026/10/12"),
     ("sambert-zhiqi-v1",                    *_SAMBERT),
-    ("cosyvoice-v1",                        "剩10,000/共10,000", "2099/01/01"),
+    ("cosyvoice-v1",                        *_COSYVOICE),
     ("sambert-zhiting-v1",                  *_SAMBERT),
     ("sambert-zhiyuan-v1",                  *_SAMBERT),
-    ("qwen-audio-3.0-asr-flash-filetrans",  *_PARAFORMER[:1], "2026/10/27"),
     ("sambert-zhixiang-v1",                 *_SAMBERT),
     ("paraformer-mtl-v1",                   *_PARAFORMER),
     ("sambert-zhifei-v1",                   *_SAMBERT),
@@ -131,9 +138,8 @@ _AUDIO_ROWS = _rows(_A, [
     ("sambert-cally-v1",                    *_SAMBERT),
     ("sambert-zhimiao-emo-v1",              *_SAMBERT),
     ("sambert-zhishuo-v1",                  *_SAMBERT),
-    ("cosyvoice-clone-v1",                  "剩10,000/共10,000", "2099/01/01"),
+    ("cosyvoice-clone-v1",                  *_COSYVOICE),
     ("sambert-zhiqian-v1",                  *_SAMBERT),
-    ("fun-asr-flash-2026-06-15",            *_PARAFORMER[:1], "2026/09/16"),
     ("sambert-zhina-v1",                    *_SAMBERT),
 ])
 
@@ -160,7 +166,7 @@ def get_bailian_account_quota() -> dict:
     for r in BAILIAN_ACCOUNT_QUOTA:
         counts[r["category"]] = counts.get(r["category"], 0) + 1
     return {
-        "snapshot_date": "2026-09-02",
+        "snapshot_date": "2026-10-02",
         "total": len(BAILIAN_ACCOUNT_QUOTA),
         "counts": counts,
         "category_labels": QUOTA_CATEGORY_LABELS,

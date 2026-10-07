@@ -1,0 +1,22 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-8 空间网格聚类热点分析流程图
+
+start
+:读取查询时段内的历史火点集合;
+:按经纬度将研究区划分为 0.1 度网格;
+:将火点按坐标归入所属网格;
+:统计各网格火点数量与火辐射功率总和;
+:按火点数量降序输出热点网格 Top-N;
+:结合预测火险数据识别\n火险等级不低于三级的州市;
+:输出热点清单与高风险区域结论\n（供报告章节引用）;
+stop
+@enduml

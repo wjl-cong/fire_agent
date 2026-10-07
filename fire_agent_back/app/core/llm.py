@@ -5,6 +5,7 @@ LangChain LLM & Embedding 客户端 — 多提供商支持
   - aliyun:  阿里百炼 / 任意 OpenAI 兼容 API
   - amd:     AMD GPU Cloud（OpenAI 兼容格式）
   - ollama:  本地 Ollama（OpenAI 兼容格式，无需 API Key）
+  - longcat: LongCat API（OpenAI 兼容格式，仅 LLM）
 """
 from datetime import datetime
 import base64
@@ -29,6 +30,8 @@ def get_llm(**kwargs) -> ChatOpenAI | None:
         return _get_amd_llm(**kwargs)
     if provider == "ollama":
         return _get_ollama_llm(**kwargs)
+    if provider == "longcat":
+        return _get_longcat_llm(**kwargs)
     return _get_aliyun_llm(**kwargs)
 
 
@@ -150,6 +153,8 @@ def llm_available() -> bool:
         return bool(settings.AMD_API_KEY)
     if provider == "ollama":
         return bool(settings.OLLAMA_API_BASE)  # 本地 Ollama 无需 API Key
+    if provider == "longcat":
+        return bool(settings.LONGCAT_API_KEY)
     return bool(settings.LLM_API_KEY)
 
 
@@ -169,6 +174,11 @@ def list_provider_models(provider: str | None = None) -> list[str]:
         base = settings.OLLAMA_API_BASE
         key = "ollama"  # Ollama 不校验 Key
         if not base:
+            return []
+    elif provider == "longcat":
+        base = settings.LONGCAT_API_BASE or "https://api.longcat.chat/openai"
+        key = settings.LONGCAT_API_KEY
+        if not key:
             return []
     else:  # aliyun
         base = settings.LLM_API_BASE or "https://dashscope.aliyuncs.com/compatible-mode/v1"
@@ -239,6 +249,21 @@ def _get_ollama_llm(**kwargs) -> ChatOpenAI | None:
         model=kwargs.get("model", settings.OLLAMA_MODEL),
         api_key="ollama",  # Ollama 不校验 Key，但 SDK 要求非空
         base_url=settings.OLLAMA_API_BASE,
+        temperature=kwargs.get("temperature", 0.1),
+        max_tokens=kwargs.get("max_tokens", 2048),
+    )
+
+
+# ===================== LongCat =====================
+
+def _get_longcat_llm(**kwargs) -> ChatOpenAI | None:
+    """LongCat LLM 实例（OpenAI 兼容接口，仅对话模型；不透传百炼专有 extra_body）"""
+    if not settings.LONGCAT_API_KEY:
+        return None
+    return ChatOpenAI(
+        model=kwargs.get("model", settings.LONGCAT_MODEL),
+        api_key=settings.LONGCAT_API_KEY,
+        base_url=settings.LONGCAT_API_BASE or "https://api.longcat.chat/openai",
         temperature=kwargs.get("temperature", 0.1),
         max_tokens=kwargs.get("max_tokens", 2048),
     )

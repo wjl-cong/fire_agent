@@ -1,0 +1,48 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam actor {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+skinparam usecase {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+left to right direction
+title 图 4-1 系统总体用例图
+
+actor "普通用户" as user
+actor "管理员" as admin
+
+rectangle "焰哨森林火险智能分析平台" {
+  usecase "登录 / 注册" as UC0
+  usecase "浏览作战大屏\n（火点 / 火险 / 边界）" as UC1
+  usecase "自然语言智能查询" as UC2
+  usecase "知识库文档管理\n与检索问答" as UC3
+  usecase "发起多智能体分析任务\n并审批报告" as UC4
+  usecase "报告检索 / 导出 / 打印" as UC5
+  usecase "AI 火情图像识别" as UC6
+  usecase "语音输入与语音播报" as UC7
+  usecase "系统配置管理\n（模型 / 数据源热更新）" as UC8
+  usecase "用户与角色管理" as UC9
+  usecase "查看系统日志" as UC10
+}
+
+user --> UC0
+user --> UC1
+user --> UC2
+user --> UC3
+user --> UC4
+user --> UC5
+user --> UC6
+user --> UC7
+admin --> UC0
+admin --> UC8
+admin --> UC9
+admin --> UC10
+UC8 .> UC10 : <<include>>
+@enduml

@@ -1,0 +1,61 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam rectangle {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+skinparam database {
+  BorderColor #333333
+  BackgroundColor #F5F5F5
+}
+title 图 5-1 系统总体分层架构图
+
+rectangle "展示层（单页应用，七个页面）" as L1 #F5F5F5 {
+  rectangle "登录注册" as p1
+  rectangle "作战大屏" as p2
+  rectangle "智能查询" as p3
+  rectangle "知识库" as p4
+  rectangle "协作中心" as p5
+  rectangle "报告中心" as p6
+  rectangle "系统管理" as p7
+}
+
+rectangle "接入层（REST 接口服务）" as L2 #F5F5F5 {
+  rectangle "认证 / 大屏 / 查询 / 知识库" as r1
+  rectangle "协作 / 报告 / 管理 / 视觉语音" as r2
+}
+
+rectangle "业务服务层" as L3 #F5F5F5 {
+  rectangle "查询服务\n（意图识别与执行）" as s1
+  rectangle "检索问答服务\n（切分 / 向量 / 混合检索）" as s2
+  rectangle "数据访问仓库" as s3
+}
+
+rectangle "智能体编排层（状态图驱动）" as L4 #F5F5F5 {
+  rectangle "编排智能体" as a1
+  rectangle "数据 / 空间分析 /\n知识检索 / 报告智能体" as a2
+}
+
+rectangle "数据层" as L5 #F5F5F5 {
+  database "业务数据表\n（火点 / 火险 / 边界）" as d1
+  database "平台数据表\n（用户 / 任务 / 报告 / 文档）" as d2
+}
+
+rectangle "模型服务层（三提供商可切换）" as L6 #F5F5F5 {
+  rectangle "对话模型" as m1
+  rectangle "向量 / 视觉 /\n语音模型" as m2
+}
+
+L1 -down-> L2 : HTTPS + 令牌鉴权
+L2 -down-> L3
+L2 -down-> L4
+L3 -down-> L5
+L4 -down-> L3 : 复用数据访问
+L4 -right-> L6
+L3 -right-> L6
+L4 -down-> L5
+@enduml

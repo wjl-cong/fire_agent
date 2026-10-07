@@ -1,0 +1,38 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam sequence {
+  ArrowColor #333333
+  LifeLineBorderColor #999999
+  ParticipantBorderColor #333333
+  ParticipantBackgroundColor #FFFFFF
+  ActorBorderColor #333333
+}
+title 图 6-4 人工审批中断与恢复时序图
+
+actor 用户 as u
+participant "任务接口" as api
+participant "编排状态机" as sm
+database "检查点存储" as cp
+participant "报告智能体" as rep
+database "业务数据库" as db
+
+sm -> api : 报告评审通过，到达审批闸口
+sm -> cp : 中断（interrupt）\n持久化当前状态
+api -> db : 任务状态置为待审批
+api --> u : 推送审批事件（含报告全文）
+u -> api : 提交决策（通过 / 编辑 / 驳回）
+api -> sm : 以同一线程标识恢复执行\n并注入决策
+sm -> cp : 读取中断前状态
+alt 决策 = 驳回
+  sm -> rep : 以驳回意见为上下文重写报告
+  rep --> sm : 新报告
+else 决策 = 通过 / 编辑
+  sm -> sm : 定稿报告（编辑决策含修改内容）
+end
+sm -> db : 报告落库，任务状态置为完成
+api --> u : 推送终态事件
+@enduml

@@ -118,6 +118,20 @@ AMD_CONSOLE_URLS = {
     "usage": "https://developer.amd.com.cn/",
 }
 
+# LongCat 官方模型目录（仅 LLM；来源: https://longcat.chat/platform/docs/zh/）
+LONGCAT_MODELS = [
+    {"id": "LongCat-2.5-Preview", "name": "LongCat-2.5-Preview",
+     "desc": "高性能 Agentic 模型（1M 上下文 / 最大输出 128K）"},
+    {"id": "LongCat-2.0", "name": "LongCat-2.0",
+     "desc": "高性能 Agentic 模型（1M 上下文 / 最大输出 128K）"},
+]
+
+# LongCat 平台直达链接
+LONGCAT_CONSOLE_URLS = {
+    "console": "https://longcat.chat/platform/",
+    "docs": "https://longcat.chat/platform/docs/zh/",
+}
+
 # ====== 配置脱敏 ======
 def _mask(key: str) -> str:
     """敏感字段脱敏"""
@@ -152,6 +166,10 @@ def _current_config() -> dict:
             # 本地 Ollama
             "ollama_api_base": settings.OLLAMA_API_BASE,
             "ollama_model": settings.OLLAMA_MODEL,
+            # LongCat（仅 LLM）
+            "longcat_api_key": _mask(settings.LONGCAT_API_KEY),
+            "longcat_api_base": settings.LONGCAT_API_BASE,
+            "longcat_model": settings.LONGCAT_MODEL,
             # Qwen3.8-Flash-Next 时间窗口
             "qwen3_8_flash_start": settings.QWEN3_8_FLASH_START,
             "qwen3_8_flash_end": settings.QWEN3_8_FLASH_END,
@@ -199,6 +217,9 @@ async def update_config(req: ConfigUpdate, current: User = Depends(get_current_u
         "amd_model": "AMD_MODEL",
         "ollama_api_base": "OLLAMA_API_BASE",
         "ollama_model": "OLLAMA_MODEL",
+        "longcat_api_key": "LONGCAT_API_KEY",
+        "longcat_api_base": "LONGCAT_API_BASE",
+        "longcat_model": "LONGCAT_MODEL",
         "qwen3_8_flash_start": "QWEN3_8_FLASH_START",
         "qwen3_8_flash_end": "QWEN3_8_FLASH_END",
         "kb_chunk_size": "KB_CHUNK_SIZE",
@@ -212,7 +233,8 @@ async def update_config(req: ConfigUpdate, current: User = Depends(get_current_u
     changed_config = False
     for field, env_key in mappings.items():
         val = getattr(req, field, None)
-        if val is None:
+        # 跳过空值与脱敏值（防止前端把掩码 ak_****F9D 当真实密钥写回 .env）
+        if val is None or "****" in str(val):
             continue
         setattr(settings, env_key, val)
         if env_path.exists():
@@ -253,7 +275,7 @@ async def test_llm(current: User = Depends(get_current_user)):
     from app.core.llm import llm_available
     if not llm_available():
         provider = settings.ACTIVE_LLM_PROVIDER
-        key_field = {"amd": "AMD_API_KEY", "ollama": "OLLAMA_API_BASE"}.get(provider, "LLM_API_KEY")
+        key_field = {"amd": "AMD_API_KEY", "ollama": "OLLAMA_API_BASE", "longcat": "LONGCAT_API_KEY"}.get(provider, "LLM_API_KEY")
         return {"code": 200, "message": "success", "data": {"ok": False, "detail": f"未配置 {key_field}"}}
     from langchain_core.messages import HumanMessage
     llm = __import__("app.core.llm", fromlist=["get_llm"]).get_llm(temperature=0)
@@ -271,6 +293,7 @@ async def test_llm(current: User = Depends(get_current_user)):
         active_model = {
             "amd": settings.AMD_MODEL,
             "ollama": settings.OLLAMA_MODEL,
+            "longcat": settings.LONGCAT_MODEL,
         }.get(settings.ACTIVE_LLM_PROVIDER, settings.LLM_MODEL)
         log_system_event("model", f"模型连接测试成功: {active_model}（{settings.ACTIVE_LLM_PROVIDER}）")
         return {"code": 200, "message": "success", "data": {"ok": True, "detail": f"模型响应：{text[:50]}"}}
@@ -290,12 +313,13 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
     控制台「账号免费额度剩余量/过期时间/状态」为账号级数据，
     由 /bailian/quota 端点配合用户 Cookie 实时获取（响应附控制台直达链接）。
     """
-    if provider not in ("aliyun", "amd", "ollama"):
+    if provider not in ("aliyun", "amd", "ollama", "longcat"):
         provider = "aliyun"
     current_model = {
         "aliyun": settings.LLM_MODEL,
         "amd": settings.AMD_MODEL,
         "ollama": settings.OLLAMA_MODEL,
+        "longcat": settings.LONGCAT_MODEL,
     }[provider]
     available = list_provider_models(provider)
     fetch_ok = bool(available)
@@ -401,6 +425,18 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
             row["tier_name"] = "未知"
             models.append(row)
         directory_ok = bool(directory)
+    elif provider == "longcat":
+        # LongCat 官方静态目录（仅 LLM，共 2 个模型），verified 用 /models 实时校验
+        for m in LONGCAT_MODELS:
+            models.append(_row(m["id"], m["name"], "-", "-", 0, m["desc"], "text", True,
+                               m["id"] in avail_set))
+        # /models 返回但不在官方目录的模型（官方新增自动跟随）
+        known = {m["id"] for m in LONGCAT_MODELS}
+        for mid in available:
+            if mid not in known:
+                models.append(_row(mid, mid, "-", "-", 0, "接口返回的其他模型（未在官方目录中）",
+                                   "text", True, True))
+        directory_ok = True
     else:
         for mid in available:
             models.append(_row(mid, mid, "-", "-", 0, "", _guess_category(mid), False, True))
@@ -428,16 +464,30 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
         console_urls = AMD_CONSOLE_URLS
         quota_note = ("模型目录实时抓取自 AMD 官方 tokenfactory 页面（免费/限时免费/付费自动标注）。"
                       "Dedicated 专属模型（付费）需消耗自有 Credits 部署实例，精确计费以 AMD 开发者控制台为准。")
+    elif provider == "longcat":
+        console_urls = LONGCAT_CONSOLE_URLS
+        quota_note = ("LongCat 仅提供对话（LLM）模型，目录来自官方文档；"
+                      "Embedding 检索不受切换影响，始终使用阿里百炼。")
     else:
         console_urls = BAILIAN_CONSOLE_URLS
         quota_note = ("阿里云未提供基于 DashScope API Key 的额度/余额查询公开接口，"
                       "精确剩余额度与到期时间请点击控制台链接查看（需阿里云账号登录）。")
     key_info = {
         "provider": provider,
-        "provider_name": {"aliyun": "阿里云百炼", "amd": "AMD GPU Cloud", "ollama": "本地 Ollama"}.get(provider, provider),
-        "api_key_masked": _mask(settings.LLM_API_KEY if provider == "aliyun" else (settings.AMD_API_KEY if provider == "amd" else "")),
-        "api_key_configured": bool(settings.LLM_API_KEY if provider == "aliyun" else (settings.AMD_API_KEY if provider == "amd" else settings.OLLAMA_API_BASE)),
-        "api_base": settings.LLM_API_BASE if provider == "aliyun" else (settings.AMD_API_BASE if provider == "amd" else settings.OLLAMA_API_BASE),
+        "provider_name": {"aliyun": "阿里云百炼", "amd": "AMD GPU Cloud", "ollama": "本地 Ollama",
+                          "longcat": "LongCat"}.get(provider, provider),
+        "api_key_masked": _mask(
+            settings.LLM_API_KEY if provider == "aliyun"
+            else (settings.AMD_API_KEY if provider == "amd"
+                  else (settings.LONGCAT_API_KEY if provider == "longcat" else ""))),
+        "api_key_configured": bool(
+            settings.LLM_API_KEY if provider == "aliyun"
+            else (settings.AMD_API_KEY if provider == "amd"
+                  else (settings.LONGCAT_API_KEY if provider == "longcat" else settings.OLLAMA_API_BASE))),
+        "api_base": (
+            settings.LLM_API_BASE if provider == "aliyun"
+            else (settings.AMD_API_BASE if provider == "amd"
+                  else (settings.LONGCAT_API_BASE if provider == "longcat" else settings.OLLAMA_API_BASE))),
         "current_model": current_model,
         "embedding_model": settings.EMBEDDING_MODEL,
         "vision_provider": settings.VISION_PROVIDER,
@@ -470,7 +520,7 @@ async def list_llm_models(provider: str = "aliyun", current: User = Depends(get_
 @router.get("/bailian/quota")
 async def bailian_account_quota(current: User = Depends(get_current_user)):
     """
-    百炼账号免费额度（静态内置快照，2026-09-02 从控制台同步）
+    百炼账号免费额度（静态内置快照，2026-10-02 从控制台同步）
 
     控制台「剩余量/过期时间/状态」为账号级登录态数据、无公开 API，
     按需求改为静态内置（app/core/bailian_quota_data.py）；
@@ -493,7 +543,11 @@ async def system_status(current: User = Depends(get_current_user)):
     except Exception:
         db_ok = False
     from app.core.llm import llm_available
-    active_model = settings.AMD_MODEL if settings.ACTIVE_LLM_PROVIDER == "amd" else settings.LLM_MODEL
+    active_model = {
+        "amd": settings.AMD_MODEL,
+        "ollama": settings.OLLAMA_MODEL,
+        "longcat": settings.LONGCAT_MODEL,
+    }.get(settings.ACTIVE_LLM_PROVIDER, settings.LLM_MODEL)
     return {
         "code": 200,
         "message": "success",

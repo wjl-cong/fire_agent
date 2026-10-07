@@ -6,7 +6,7 @@
  */
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Connection, Monitor, Setting, Document, CircleCheck, CircleClose, Promotion, Cpu } from '@element-plus/icons-vue'
+import { Refresh, Connection, Monitor, Setting, Document, CircleCheck, CircleClose, Promotion, Cpu, User } from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 import { API_V1 } from '@/utils/config'
 import { useRouter } from 'vue-router'
@@ -59,6 +59,9 @@ const configForm = reactive({
   // 本地 Ollama（无需 API Key）
   ollama_api_base: 'http://localhost:11434/v1',
   ollama_model: 'qwen2.5:7b',
+  longcat_api_key: '',
+  longcat_api_base: 'https://api.longcat.chat/openai',
+  longcat_model: 'LongCat-2.5-Preview',
   // 知识库
   kb_chunk_size: 500,
   kb_chunk_overlap: 50,
@@ -117,6 +120,9 @@ const fetchConfig = async () => {
         // Ollama
         ollama_api_base: m.ollama_api_base || 'http://localhost:11434/v1',
         ollama_model: m.ollama_model || 'qwen2.5:7b',
+        // longcat_api_key 不回填（后端返回的是脱敏值，回填后再保存会把掩码当真实密钥写回）
+        longcat_api_base: m.longcat_api_base || 'https://api.longcat.chat/openai',
+        longcat_model: m.longcat_model || 'LongCat-2.5-Preview',
         // 知识库
         kb_chunk_size: json.data.rag?.kb_chunk_size || 500,
         kb_chunk_overlap: json.data.rag?.kb_chunk_overlap || 50,
@@ -253,6 +259,59 @@ const applyAmdModel = async (mid, category = 'text') => {
         })
       }
       ElMessage.success(`已切换${label}模型：${mid}（已写入 .env 并热生效）`)
+      fetchStatus()
+    } else {
+      ElMessage.error('切换失败')
+    }
+  } catch {
+    ElMessage.error('切换失败')
+  }
+}
+
+// ====== LongCat 模型列表（官方静态目录，仅 LLM） ======
+const longcatModelList = ref(null) // { fetch_ok, available_count, current_model, models, key_info }
+const loadingLongcatModels = ref(false)
+
+const fetchLongcatModels = async () => {
+  loadingLongcatModels.value = true
+  try {
+    const res = await authFetch(`${API_BASE}/llm/models?provider=longcat`)
+    const json = await res.json()
+    if (json.code === 200) {
+      longcatModelList.value = json.data
+      if (!json.data.fetch_ok) {
+        ElMessage.warning('已获取 LongCat 官方目录，但 /models 校验失败（请检查 API Key），可用性标记仅供参考')
+      } else {
+        ElMessage.success(`已获取 ${json.data.available_count} 个可用模型`)
+      }
+    } else {
+      ElMessage.error('获取 LongCat 模型列表失败')
+    }
+  } catch {
+    ElMessage.error('获取 LongCat 模型列表失败')
+  } finally {
+    loadingLongcatModels.value = false
+  }
+}
+
+// 一键切换 LongCat 模型（仅 Chat 槽位）：写 .env 热生效
+const applyLongcatModel = async (mid) => {
+  try {
+    const res = await authFetch(`${API_BASE}/config`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ active_provider: 'longcat', longcat_model: mid }),
+    })
+    const json = await res.json()
+    if (json.code === 200) {
+      configForm.longcat_model = mid
+      if (longcatModelList.value) {
+        longcatModelList.value.models = longcatModelList.value.models.map(m => ({
+          ...m, is_current: m.id === mid,
+        }))
+        if (longcatModelList.value.key_info) longcatModelList.value.key_info.current_model = mid
+      }
+      ElMessage.success(`已切换 Chat 模型：${mid}（已写入 .env 并热生效）`)
       fetchStatus()
     } else {
       ElMessage.error('切换失败')
@@ -475,6 +534,9 @@ const saveConfig = async () => {
     // Ollama 字段
     ollama_api_base: configForm.ollama_api_base.trim() || null,
     ollama_model: configForm.ollama_model.trim() || null,
+    longcat_api_key: configForm.longcat_api_key.trim() || null,
+    longcat_api_base: configForm.longcat_api_base.trim() || null,
+    longcat_model: configForm.longcat_model.trim() || null,
     // 知识库
     kb_chunk_size: Number(configForm.kb_chunk_size),
     kb_chunk_overlap: Number(configForm.kb_chunk_overlap),
@@ -665,7 +727,7 @@ onUnmounted(() => {
         <el-icon><Refresh /></el-icon> 系统日志
       </button>
       <button v-if="auth.user?.role === 'admin'" class="atab" :class="{ active: activeTab === 'users' }" @click="activeTab = 'users'; fetchUsers()">
-        <el-icon><UserIcon /></el-icon> 用户管理
+        <el-icon><User /></el-icon> 用户管理
       </button>
     </div>
 
@@ -773,6 +835,14 @@ onUnmounted(() => {
           >
             <el-icon><Cpu /></el-icon>
             本地 Ollama
+          </button>
+          <button
+            class="popt"
+            :class="{ active: configForm.active_provider === 'longcat' }"
+            @click="configForm.active_provider = 'longcat'"
+          >
+            <el-icon><Connection /></el-icon>
+            LongCat
           </button>
         </div>
       </div>
@@ -1160,6 +1230,84 @@ onUnmounted(() => {
         </div>
       </template>
 
+      <!-- ===== LongCat 配置 ===== -->
+      <template v-if="configForm.active_provider === 'longcat'">
+        <div class="panel-sub">LongCat 配置（仅 LLM 模型，Embedding 始终走阿里百炼）</div>
+        <div class="form-grid">
+          <div class="form-item">
+            <label>LongCat API Key</label>
+            <el-input v-model="configForm.longcat_api_key" type="password" show-password placeholder="ak-..." />
+          </div>
+          <div class="form-item">
+            <label>API Base URL</label>
+            <el-input v-model="configForm.longcat_api_base" placeholder="https://api.longcat.chat/openai" />
+          </div>
+          <div class="form-item">
+            <label>Chat 模型</label>
+            <el-input v-model="configForm.longcat_model" placeholder="LongCat-2.5-Preview" />
+          </div>
+        </div>
+
+        <!-- LongCat 模型列表（官方目录 + /models 校验） -->
+        <div class="free-models-head">
+          <div class="panel-sub" style="margin:0">
+            LongCat 模型列表
+            <el-button size="small" :loading="loadingLongcatModels" style="margin-left:12px" @click="fetchLongcatModels">
+              <el-icon><Refresh /></el-icon>&nbsp;获取模型列表
+            </el-button>
+          </div>
+          <div class="free-models-hint">
+            点击获取后，系统将调用 LongCat OpenAI 兼容 <code>GET /models</code> 校验当前 Key 可用性，
+            并按官方文档目录（<a href="https://longcat.chat/platform/docs/zh/" target="_blank">longcat.chat/platform/docs</a>）展示。
+            点击「使用」立即切换并热生效，无需重启。
+          </div>
+        </div>
+
+        <el-alert
+          v-if="longcatModelList && !longcatModelList.fetch_ok"
+          type="warning"
+          :closable="false"
+          style="margin-bottom:10px"
+          title="LongCat /models 接口校验失败（请检查网络 / API Key），目录仅供展示"
+        />
+
+        <el-table v-if="longcatModelList" :data="longcatModelList.models" size="small" max-height="300" border>
+          <el-table-column prop="id" label="模型 ID" min-width="200">
+            <template #default="{ row }">
+              <el-tag v-if="row.is_current" type="success" size="small">当前</el-tag>
+              <span style="margin-left:6px; font-family: monospace">{{ row.id }}</span>
+            </template>
+          </el-table-column>
+          <el-table-column prop="name" label="名称" min-width="150" />
+          <el-table-column label="校验" width="80" align="center">
+            <template #default="{ row }">
+              <el-tooltip :content="row.verified ? '已通过 /models 接口校验，当前 Key 可调用' : '未在 /models 返回中（可能已下线）'">
+                <el-tag :type="row.verified ? 'success' : 'info'" size="small">
+                  {{ row.verified ? '已验证' : '未验证' }}
+                </el-tag>
+              </el-tooltip>
+            </template>
+          </el-table-column>
+          <el-table-column prop="desc" label="说明" min-width="220" show-overflow-tooltip />
+          <el-table-column label="操作" width="90" fixed="right" align="center">
+            <template #default="{ row }">
+              <el-button
+                size="small"
+                type="primary"
+                :disabled="row.is_current"
+                @click="applyLongcatModel(row.id)"
+              >
+                使用
+              </el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+
+        <div class="ollama-hint">
+          提示：LongCat 仅提供对话（LLM）模型，Embedding 检索不受切换影响，始终使用阿里百炼。
+        </div>
+      </template>
+
       <!-- 知识库参数（公共） -->
       <div class="panel-sub">知识库参数</div>
       <div class="form-grid">
@@ -1180,7 +1328,7 @@ onUnmounted(() => {
       <div class="action-row">
         <el-button type="primary" @click="saveConfig">保存模型配置</el-button>
         <el-button :loading="testing" @click="testLlmConn">
-          测试{{ configForm.active_provider === 'amd' ? ' AMD' : (configForm.active_provider === 'ollama' ? ' Ollama' : '') }}模型连接
+          测试{{ configForm.active_provider === 'amd' ? ' AMD' : (configForm.active_provider === 'ollama' ? ' Ollama' : (configForm.active_provider === 'longcat' ? ' LongCat' : '')) }}模型连接
         </el-button>
       </div>
 
@@ -1259,7 +1407,7 @@ onUnmounted(() => {
     <!-- ====== 用户管理（仅管理员） ====== -->
     <div v-else-if="activeTab === 'users'" class="admin-panel">
       <div class="panel-title">
-        <el-icon><UserIcon /></el-icon>
+        <el-icon><User /></el-icon>
         用户权限管理
         <el-button size="small" style="margin-left:auto" :icon="Refresh" @click="fetchUsers" :loading="loadingUsers">刷新</el-button>
       </div>

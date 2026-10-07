@@ -1,0 +1,112 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 12
+skinparam ArrowColor #333333
+skinparam entity {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+title 图 5-3 数据库核心实体关系图
+
+entity "用户" as users {
+  * 用户标识 <<主键>>
+  --
+  用户名（唯一）
+  邮箱
+  密码哈希
+  角色
+  创建时间
+}
+entity "历史火点" as fire {
+  * 记录标识 <<主键>>
+  --
+  采集日期 / 时间
+  亮度 / 31波段亮度
+  火辐射功率
+  置信度
+  经度 / 纬度
+  空间几何（点）
+  所属州市
+}
+entity "预测火险" as risk {
+  * 记录标识 <<主键>>
+  --
+  州市 / 年 / 月 / 日
+  视图模式（逐日/逐月）
+  火险指数 / 等级
+  预测火点数 / 风险评分
+  空间几何
+}
+entity "行政边界" as region {
+  * 区域标识 <<主键>>
+  --
+  区域名称 / 级别 / 编码
+  空间几何（多边形）
+  中心点坐标
+}
+entity "智能体任务" as task {
+  * 任务标识 <<主键>>
+  --
+  任务名称 / 用户输入
+  状态 / 当前步骤
+  报告标识（外键）
+  用户标识（外键）
+}
+entity "任务步骤" as step {
+  * 步骤标识 <<主键>>
+  --
+  任务标识（外键）
+  步骤序号 / 智能体名
+  输入载荷 / 输出载荷
+  状态
+}
+entity "分析报告" as report {
+  * 报告标识 <<主键>>
+  --
+  标题 / 类型 / 摘要
+  Markdown 正文
+  章节 / 标签 / 状态
+  用户标识（外键）
+}
+entity "知识文档" as kbdoc {
+  * 文档标识 <<主键>>
+  --
+  标题 / 分类 / 类型
+  处理状态 / 摘要
+  用户标识（外键）
+}
+entity "知识分片" as kbchunk {
+  * 分片标识 <<主键>>
+  --
+  文档标识（外键）
+  分片序号 / 内容
+  词元数 / 向量
+}
+entity "查询历史" as qh {
+  * 历史标识 <<主键>>
+  --
+  查询文本 / 摘要
+  解析方式 / 结果
+  用户标识（外键）
+}
+entity "识别历史" as vh {
+  * 记录标识 <<主键>>
+  --
+  原始文件名 / 图片路径
+  识别结果 / 模型名
+  用户标识（外键）
+}
+
+users ||--o{ qh : 发起
+users ||--o{ task : 创建
+users ||--o{ kbdoc : 上传
+users ||--o{ vh : 识别
+users ||--o{ report : 拥有
+task ||--o{ step : 包含
+task }o--|| report : 产出
+kbdoc ||--o{ kbchunk : 切分
+fire }o--|| region : 归属
+risk }o--|| region : 归属
+@enduml

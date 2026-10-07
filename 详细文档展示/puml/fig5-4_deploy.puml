@@ -1,0 +1,46 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam node {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+skinparam artifact {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+skinparam database {
+  BorderColor #333333
+  BackgroundColor #F5F5F5
+}
+title 图 5-4 系统部署架构图
+
+node "用户浏览器" as browser {
+  artifact "单页应用\n（静态资源）" as spa
+}
+
+node "应用服务器（云端）" as server {
+  node "前端容器（Nginx）" as nginx {
+    artifact "静态资源服务\n反向代理 /api" as ngconf
+  }
+  node "后端容器" as backend {
+    artifact "接口服务\n（异步任务 + 实时推送）" as apiapp
+  }
+  node "数据库容器" as dbnode {
+    database "空间数据库\n（含空间扩展）" as pg
+  }
+}
+
+cloud "外部模型服务" as cloud {
+  node "对话 / 向量模型服务" as m1
+  node "视觉 / 语音模型服务" as m2
+}
+
+browser -down-> nginx : HTTPS
+nginx -down-> apiapp : /api 反向代理\n（关闭缓冲，长超时）
+apiapp -down-> pg : SQL / 空间查询
+apiapp -right-> cloud : HTTPS 调用
+@enduml

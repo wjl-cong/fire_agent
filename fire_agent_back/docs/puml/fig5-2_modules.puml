@@ -1,0 +1,57 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam rectangle {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+title 图 5-2 系统功能模块结构图
+
+rectangle "焰哨森林火险智能分析平台" as root #F5F5F5 {
+  rectangle "认证与权限模块" as m1
+  rectangle "作战大屏模块" as m2
+  rectangle "智能查询模块" as m3
+  rectangle "知识库问答模块" as m4
+  rectangle "多智能体协作模块" as m5
+  rectangle "报告管理模块" as m6
+  rectangle "视觉与语音模块" as m7
+  rectangle "系统管理模块" as m8
+}
+
+rectangle "认证与权限模块" as d1 #FFFFFF {
+  rectangle "注册登录" as d1a
+  rectangle "角色控制" as d1b
+  rectangle "数据隔离" as d1c
+}
+rectangle "多智能体协作模块" as d5 #FFFFFF {
+  rectangle "任务拆解路由" as d5a
+  rectangle "并行数据获取" as d5b
+  rectangle "空间热点分析" as d5c
+  rectangle "报告生成与评审" as d5d
+  rectangle "人工审批" as d5e
+  rectangle "实时进度推送" as d5f
+}
+rectangle "系统管理模块" as d8 #FFFFFF {
+  rectangle "配置热更新" as d8a
+  rectangle "连接测试" as d8b
+  rectangle "模型目录" as d8c
+  rectangle "日志与用户管理" as d8d
+}
+
+m1 -down-> d1a
+m1 -down-> d1b
+m1 -down-> d1c
+m5 -down-> d5a
+m5 -down-> d5b
+m5 -down-> d5c
+m5 -down-> d5d
+m5 -down-> d5e
+m5 -down-> d5f
+m8 -down-> d8a
+m8 -down-> d8b
+m8 -down-> d8c
+m8 -down-> d8d
+@enduml

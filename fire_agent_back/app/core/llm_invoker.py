@@ -20,7 +20,7 @@ from app.core.config import settings
 T = TypeVar("T", bound=BaseModel)
 
 # 降级链顺序：激活 Provider 优先，其余按固定顺序补充
-_ALL_PROVIDERS = ("aliyun", "amd", "ollama")
+_ALL_PROVIDERS = ("aliyun", "amd", "ollama", "longcat")
 
 
 def _provider_chain() -> list[str]:
@@ -35,6 +35,8 @@ def _build_llm(provider: str, **kwargs):
         return _llm_mod._get_amd_llm(**kwargs)
     if provider == "ollama":
         return _llm_mod._get_ollama_llm(**kwargs)
+    if provider == "longcat":
+        return _llm_mod._get_longcat_llm(**kwargs)
     return _llm_mod._get_aliyun_llm(**kwargs)
 
 
@@ -46,6 +48,8 @@ def _resolve_model(provider: str, kwargs: dict) -> str:
         return settings.AMD_MODEL or "DeepSeek-V4-Flash"
     if provider == "ollama":
         return settings.OLLAMA_MODEL or ""
+    if provider == "longcat":
+        return settings.LONGCAT_MODEL or ""
     return settings.LLM_MODEL or ""
 
 
@@ -242,6 +246,10 @@ def invoke_structured(
         kwargs["temperature"] = temperature
     if max_tokens is not None:
         kwargs["max_tokens"] = max_tokens
+    # 结构化输出走 function calling：思考型模型（qwen3.x 等）必须关闭思考，
+    # 否则 reasoning 先吃满 max_tokens，正文为空触发 LengthFinishReasonError
+    kwargs["enable_thinking"] = False
+    kwargs["max_tokens"] = max(kwargs.get("max_tokens") or 0, 2000)
 
     # —— 第一级：结构化输出 ——
     for provider in _provider_chain():

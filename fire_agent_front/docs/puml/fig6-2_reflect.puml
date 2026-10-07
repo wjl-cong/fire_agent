@@ -1,0 +1,30 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-2 数据查询反思重试流程图
+
+start
+:解析任务计划中的查询参数;
+:执行历史火点与预测火险双数据源查询;
+if (查询结果为空?) then (否)
+  :记录结果与尝试次数;
+  stop
+else (是)
+  :记录空结果原因;
+  if (重试轮次 < 上限?) then (是)
+    :模型反思分析空结果原因\n（时间范围过窄 / 州市拼写偏差 / 视图模式不匹配）;
+    :生成放宽后的查询参数\n（如不限月份、扩大年份区间、修正州市名）;
+    :按新参数重新执行查询;
+  else (否)
+    :返回空结果说明\n（报告中如实声明数据缺失）;
+    stop
+  endif
+endif
+@enduml

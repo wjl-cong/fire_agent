@@ -8,7 +8,7 @@ from pydantic import BaseModel
 class ConfigUpdate(BaseModel):
     """配置更新请求（仅更新非空字段）"""
     # 活跃提供商切换
-    active_provider: Optional[str] = None  # aliyun | amd | ollama
+    active_provider: Optional[str] = None  # aliyun | amd | ollama | longcat
 
     # 阿里百炼 / 通用 OpenAI 兼容
     amap_key: Optional[str] = None
@@ -31,6 +31,11 @@ class ConfigUpdate(BaseModel):
     # 本地 Ollama（无需 API Key）
     ollama_api_base: Optional[str] = None
     ollama_model: Optional[str] = None
+
+    # LongCat（兼容 OpenAI 格式，仅 LLM）
+    longcat_api_key: Optional[str] = None
+    longcat_api_base: Optional[str] = None
+    longcat_model: Optional[str] = None
 
     # Qwen3.8-Flash-Next 时间窗口
     qwen3_8_flash_start: Optional[str] = None

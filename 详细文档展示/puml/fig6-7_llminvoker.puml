@@ -1,0 +1,38 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #FFFFFF
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+title 图 6-7 统一大模型调用可靠性机制流程图
+
+start
+:业务模块发起模型调用\n（文本 / 结构化 / 流式三类入口）;
+:按活跃提供商发起请求;
+if (遇到限流 / 超时 / 连接类异常?) then (是)
+  if (重试次数未达上限?) then (是)
+    :指数退避等待\n（1 秒 / 2 秒 / 4 秒）后重试;
+  else (否)
+    :触发熔断判定;
+  endif
+else (否)
+endif
+if (连续失败达到熔断阈值?) then (是)
+  :熔断打开（冷却期内不再请求该提供商）;
+else (否)
+endif
+if (仍无有效响应?) then (是)
+  :按提供商链切换备选模型服务;
+  if (全部提供商均失败?) then (是)
+    :规则兜底（关键词解析 / 模板报告）;
+  else (否)
+  endif
+else (否)
+endif
+:返回结果与审计信息\n（提供商 / 模型 / 词元数 / 是否降级）;
+stop
+@enduml

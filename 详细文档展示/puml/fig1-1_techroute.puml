@@ -1,0 +1,33 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam ActivityBorderColor #333333
+skinparam ActivityBackgroundColor #F5F5F5
+skinparam ActivityDiamondBorderColor #333333
+skinparam ActivityDiamondBackgroundColor #FFFFFF
+skinparam ConditionEndColor #333333
+
+title 图 1-1 论文研究技术路线图
+start
+:问题定义：森林火险分析链条长、\n查询门槛高、知识分散、报告依赖人工;
+:任务抽象：自然语言驱动的\n数据查询—空间分析—知识检索—报告生成任务链路;
+partition 方案设计 {
+  :总体架构设计（前后端分离 + 多智能体编排）;
+  :数据库设计（空间数据 + 平台数据 13 表）;
+  :编排机制设计（计划路由 / 并行汇聚 / 反思 / 评审 / 人工审批）;
+}
+partition 系统实现 {
+  :后端实现：接口服务、智能体编排、\n检索增强问答、多模型可靠调用;
+  :前端实现：作战大屏、智能查询、\n知识库、协作中心、报告中心;
+}
+partition 系统验证 {
+  :功能测试（黑盒用例 + 接口测试）;
+  :编排回归评估（金标用例 + 确定性指标）;
+  :运行效果验证（真实数据界面截图）;
+}
+:结论与展望;
+stop
+@enduml

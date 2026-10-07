@@ -1,0 +1,33 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam state {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+title 图 2-3 LangGraph 状态图编排原理示意图
+
+state "全局共享状态\n（TypedDict + 归并函数）" as gs
+state "节点 A\n（处理函数，返回状态增量）" as na
+state "节点 B" as nb
+state "条件边\n（依据状态路由到后继节点）" as ce
+
+[*] --> gs
+gs --> na
+na --> nb : 固定边
+nb --> ce
+ce --> na : 条件成立（支持循环）
+ce --> [*] : 条件不成立
+
+note right of gs
+  归并函数（reducer）决定并行节点
+  写入同一状态键时的合并方式
+end note
+note right of ce
+  条件边使图具备分支、循环与
+  中断恢复能力，可表达复杂工作流
+end note
+@enduml

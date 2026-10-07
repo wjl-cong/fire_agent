@@ -1,0 +1,28 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 14
+skinparam ArrowColor #333333
+skinparam rectangle {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+title 图 2-1 Transformer 模型基本结构示意图
+
+rectangle "输入序列（词元嵌入 + 位置编码）" as inp
+rectangle "编码器（多头自注意力 + 前馈网络，堆叠 N 层）" as enc
+rectangle "解码器（掩码自注意力 + 交叉注意力 + 前馈网络，堆叠 N 层）" as dec
+rectangle "输出层（线性映射 + Softmax）" as out
+rectangle "输出序列（逐词元生成）" as oseq
+
+inp -down-> enc
+enc -right-> dec : 编码表示
+dec -down-> out
+out -down-> oseq
+
+note bottom of enc
+  自注意力机制：Attention(Q,K,V) = softmax(QK^T/√d_k)·V
+  使模型能够建模长距离上下文依赖
+end note
+@enduml

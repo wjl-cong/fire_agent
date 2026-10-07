@@ -1,0 +1,36 @@
+@startuml
+skinparam backgroundColor white
+skinparam shadowing false
+skinparam defaultFontName Microsoft YaHei
+skinparam defaultFontSize 13
+skinparam ArrowColor #333333
+skinparam state {
+  BorderColor #333333
+  BackgroundColor #FFFFFF
+}
+title 图 6-1 多智能体编排状态图
+
+state "任务拆解\n（结构化执行计划）" as parse
+state "数据查询\n（双数据源）" as query
+state "知识检索\n（混合检索）" as rag
+state "空间分析\n（网格聚类）" as gis
+state "结果汇聚" as join
+state "报告生成\n（刚性模板 + 流式输出）" as gen
+state "报告评审\n（模型评审 + 硬性护栏）" as review
+state "人工审批\n（中断等待决策）" as approve
+state "任务完成" as done
+
+[*] --> parse
+parse --> query : 计划包含数据查询
+parse --> rag : 计划包含知识检索（并行）
+query --> gis
+rag --> join
+gis --> join
+join --> gen : 计划包含报告生成
+gen --> review
+review --> gen : 评审未通过（不超过 2 轮）
+review --> approve : 评审通过
+approve --> done : 审批通过 / 编辑
+approve --> gen : 审批驳回（注入意见重写）
+done --> [*]
+@enduml
